@@ -1,0 +1,7 @@
+# Keep model weights on the local machine.
+*.pt
+*.pth
+*.onnx
+*.engine
+*.weights
+*.ckpt
