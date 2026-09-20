@@ -1,0 +1,31 @@
+{
+  "configurations": [
+    {
+      "browse": {
+        "databaseFilename": "${default}",
+        "limitSymbolsToIncludedHeaders": false
+      },
+      "includePath": [
+        "/opt/ros/noetic/include/**",
+        "/home/jiji/catkin_ws/src/kinova-ros/kinova_moveit/inverse_kinematics_plugins/ikfast/j2n6s300_ikfast/include/**",
+        "/home/jiji/catkin_ws/src/kinova-ros/kinova_moveit/inverse_kinematics_plugins/ikfast/j2s6s300_ikfast/include/**",
+        "/home/jiji/catkin_ws/src/kinova-ros/kinova_moveit/inverse_kinematics_plugins/ikfast/j2s7s300_ikfast/include/**",
+        "/home/jiji/catkin_ws/src/kinova-ros/kinova_moveit/kinova_arm_moveit_demo/include/**",
+        "/home/jiji/catkin_ws/src/kinova-ros/kinova_driver/include/**",
+        "/home/jiji/catkin_ws/src/kinova-ros/kinova_moveit/inverse_kinematics_plugins/ikfast/m1n6s300_ikfast/include/**",
+        "/home/jiji/catkin_ws/src/vision_visp/visp_auto_tracker/include/**",
+        "/home/jiji/catkin_ws/src/vision_visp/visp_bridge/include/**",
+        "/home/jiji/catkin_ws/src/vision_visp/visp_camera_calibration/include/**",
+        "/home/jiji/catkin_ws/src/vision_visp/visp_hand2eye_calibration/include/**",
+        "/home/jiji/catkin_ws/src/vision_visp/visp_tracker/include/**",
+        "/usr/include/**"
+      ],
+      "name": "ROS",
+      "intelliSenseMode": "gcc-x64",
+      "compilerPath": "/usr/bin/gcc",
+      "cStandard": "gnu11",
+      "cppStandard": "c++14"
+    }
+  ],
+  "version": 4
+}

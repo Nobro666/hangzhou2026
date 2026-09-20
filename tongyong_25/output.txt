@@ -1,0 +1,7 @@
+20:52:10:i am looking
+20:52:13:people_flag: True sit_wave: True stand: False
+20:52:16:tell me what you like
+21:02:20:i am looking
+21:03:37:i am looking
+23:16:05:i heardSoda
+ 2025-10-02 14:29:57: 你要什么
