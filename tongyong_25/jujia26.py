@@ -139,11 +139,11 @@ class Controller:
         output = result.stdout.strip()
         return output
     
-
-    """
-    返回传入相机坐标 返回目标点
-    """
+   
     def grip_object_coor(self,list):
+        """
+        返回传入相机坐标 返回目标点
+        """
         robot_pose = self.goalpoint.get_robot_pose()
         map_object = self.transpoint.get_map_coords(list)
         goal_object = calculate_facing_goal(robot_pose,map_object,0.65)
@@ -565,53 +565,94 @@ class Controller:
         return False
 
     def handle_switch_behavior(self, person_name):
-        """询问开关需求，识别标记并将机械臂移动到标记上方。"""
-        self.speak.speak(f"{person_name}，请告诉我需要操作哪个开关")
-        switch_command = self.listen_switch_command()
+        """主人坐下或躺下：询问需求、识别开关标记、执行机械臂动作。"""
+
+        # 1. 询问并识别开关需求
+        switch_command = None
+
+        for _ in range(3):
+            if rospy.is_shutdown():
+                return False
+
+            self.speak.speak(f"{person_name}，请告诉我需要操作哪个开关")
+            text0, audio_file = record_and_recognize('zh', duration=5)
+
+            print(f"录音文件：{audio_file}")
+            print(f"开关需求识别结果：{text0}")
+
+            if text0 is not None and text0.strip():
+                # TODO 未实现：从语音中提取开关编号、颜色和操作类型。
+                # 当前仅保存原始识别文本，后续在这里补充解析逻辑。
+                switch_command = text0.strip()
+                break
+
+            self.speak.speak("没有听清，请再说一遍")
+
         if switch_command is None:
+            print("未获取到开关需求")
             return False
 
-        marker_position = self.detect_switch_marker(switch_command)
+        print(f"主人要求：{switch_command}")
+
+        # 2. 根据需求识别对应开关标记
+        marker_position = None
+        # TODO 未实现：在这里直接调用现有目标检测模块，
+        # 根据 switch_command 找到对应开关标记并获取三维坐标。
+        # 再将坐标转换到机械臂控制接口要求的坐标系。
+
         if marker_position is None:
+            print("开关标记定位尚未实现或未找到目标")
             return False
 
+        # 3. 执行机械臂动作
+        # TODO 未实现：机械臂函数暂时保留接口，返回 False。
         return self.move_arm_above_switch_marker(marker_position)
 
+
     def handle_fall_behavior(self, person_name):
-        """识别摔倒者身体位置，并将机械臂移动到人体上方。"""
+        """主人摔倒：定位人体、执行机械臂动作。"""
+
         self.speak.speak(f"{person_name}，请保持不动，我来帮助你")
-        body_position = self.get_fallen_body_pose()
+
+        # 1. 获取摔倒主人的身体位置
+        body_position = None
+        # TODO 未实现：在这里直接调用人体检测或骨架识别模块，
+        # 获取目标身体部位的三维坐标，并计算其上方的目标位置。
+        # 再将坐标转换到机械臂控制接口要求的坐标系。
+
         if body_position is None:
+            print("摔倒人体定位尚未实现或未找到目标")
             return False
+
+        # 2. 执行机械臂动作
+        # TODO 未实现：机械臂函数暂时保留接口，返回 False。
         return self.move_arm_above_person(body_position)
 
+
     def handle_wave_behavior(self, person_name):
-        """询问挥手主人的需求，并复述语音识别结果。"""
+        """主人挥手：询问需求、识别中文语音并复述。"""
+
         for _ in range(3):
+            if rospy.is_shutdown():
+                return False
+
             self.speak.speak(f"{person_name}，请告诉我你的需求")
             text0, audio_file = record_and_recognize('zh', duration=5)
-            print(f"录音文件: {audio_file}")
-            print(f"需求识别结果: {text0}")
+
+            print(f"录音文件：{audio_file}")
+            print(f"需求识别结果：{text0}")
+
             if text0 is not None and text0.strip():
                 request_text = text0.strip()
                 self.speak.speak(f"你的需求是，{request_text}")
                 return True
+
             self.speak.speak("没有听清，请再说一遍")
+
+        print("连续三次未识别到主人需求")
         return False
 
-    def switch_command(self):
-        """获取主人需要操作的开关指令。"""
-        # TODO 未实现：语音识别开关编号、颜色或操作类型。
-        # TODO 未实现：调用相机和目标检测器，返回机械臂坐标系中的标记位置
-        # TODO 未实现：根据 marker_position 规划并执行机械臂轨迹。
-        return False
 
-    def get_fallen_body_pose(self):
-        """获取摔倒主人身体上方的安全目标位置。"""
-        # TODO 未实现：由骨架关键点计算机械臂目标位置。
-        """控制机械臂移动到摔倒主人身体上方。"""
-        # TODO 未实现：根据 body_position 规划并执行机械臂轨迹。
-        return False
 
 
     def control(self):
