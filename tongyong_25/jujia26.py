@@ -234,13 +234,7 @@ class Controller:
             time.sleep(0.5)
             print(">>> 正在进行人脸注册...")
             try:
-                # register_new_face() 内部会：
-                # 1. 打开相机拍照；
-                # 2. 检测人脸；
-                # 3. 裁剪人脸；
-                # 4. 保存人脸图片；
-                # 5. 更新人脸特征；
-                # 6. 返回新的人脸 ID。
+                # 调用register_new_face() 
                 person_id = self.face.register_new_face()
             except Exception as error:
                 print(f"人脸注册发生异常: {error}")
@@ -336,7 +330,6 @@ class Controller:
         """
 
         self.speak.speak("开始巡游房间")
-
         room_results = []
 
         for room_index in range(4):
@@ -345,8 +338,6 @@ class Controller:
             print("--------------------------------")
             print(f">>> 正在巡游房间：{room_name}")
             print("--------------------------------")
-
-            # 使用 navigator.py
             self.navigator.goto(room_name)
             time.sleep(1)
 
@@ -417,8 +408,8 @@ class Controller:
             # 只有交互任务完成后，才将该主人标记为已完成。
             if interaction_success:
                 self.recognized_owner_ids.add(face_id)
-
             room_results.append(observation)
+            
             # 三位主人都找到后结束巡游
             if len(self.recognized_owner_ids) >= 3:
                 print("三位主人均已找到")
