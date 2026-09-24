@@ -15,8 +15,6 @@
 
 
 待完善功能：
-1.主人注册   register()
-2.巡游房间并寻找主人    find_room()
 3.识别主人行为   recognize_behavior()
 4.根据行为完成人机交互   interact_with_human()
 5.寻找并清理垃圾   find_and_clean_garbage()
@@ -37,20 +35,10 @@ import os
 import cv2
 from navigator import Navigator  # 导航模块
 from pathlib import Path
-# from chinese_tts.chinese_tts import speak
-# from vosk_speech_recognition.vosk_speech_recognition import (
-#     recognize_speech, 
-#     recognize_from_file, 
-#     record_and_recognize,
-#     show_recognition_log,
-#     clear_recognition_log
-# )
-from vosk_speech_recognition.vosk_speech_recognition import record_and_recognize,get_recognizer_instance 
+from vosk_speech_recognition import record_and_recognize,get_recognizer_instance 
 #因模型较大 get_recognizer_instance ·提前加载模型
 from base_controller import Base  # 底盘运动模块
 from std_msgs.msg import String  # std_msgs中包含消息类型string，发布的消息类型为String，从String.data中可获得信息，
-# 面部识别
-from find_seat import Follower
 import datetime
 import argparse
 import time
@@ -107,7 +95,7 @@ class Controller:
         self.kinova = KinovaRobot("j2n6s300")
         print("==============机械臂初始化完成==============")
     
-        self.detector = RealSenseYolo11Detector(weights=Path("/home/zq/catkin_ws/src/cmoon/src/shijiazhuang_2025/tongyong_25/model/allbest.pt"))
+        self.detector = RealSenseYolo11Detector(weights=Path("/home/zq/catkin_ws/src/cmoon/src/hangzhou2026/tongyong_25/model/yolo11m.pt"))
         self.camera = KinectCamera()
         self.people_detector = PersonDetector()
         self.items_detector = ItemsDetector()
