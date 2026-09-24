@@ -102,6 +102,10 @@ class _k4abt_tracker_configuration_t(ctypes.Structure):
         ("sensor_orientation", ctypes.c_int),
         ("processing_mode", ctypes.c_int),
         ("gpu_device_id", ctypes.c_int32),
+        # Azure Kinect Body Tracking SDK 1.1.x includes this fourth field.
+        # The configuration is passed to k4abt_tracker_create by value, so
+        # omitting it changes the native ABI and can cause a segmentation fault.
+        ("model_path", ctypes.c_char_p),
     ]
 k4abt_tracker_configuration_t = _k4abt_tracker_configuration_t
 
@@ -174,6 +178,7 @@ K4ABT_TRACKER_CONFIG_DEFAULT = k4abt_tracker_configuration_t()
 K4ABT_TRACKER_CONFIG_DEFAULT.sensor_orientation = K4ABT_SENSOR_ORIENTATION_DEFAULT
 K4ABT_TRACKER_CONFIG_DEFAULT.processing_mode = K4ABT_TRACKER_PROCESSING_MODE_GPU
 K4ABT_TRACKER_CONFIG_DEFAULT.gpu_device_id = 0
+K4ABT_TRACKER_CONFIG_DEFAULT.model_path = None
 
 body_colors = np.ones((256,3), dtype=np.uint8)*K4ABT_BODY_INDEX_MAP_BACKGROUND
 body_colors[:7,:] = np.array([[202, 183, 42], [42, 61, 202], [42, 202, 183], [202, 42,61], [183, 42, 202], [42, 202, 61], [141, 202, 42]]) 

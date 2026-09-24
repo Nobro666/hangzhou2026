@@ -11,14 +11,14 @@ class k4abt:
 
 		except Exception as e:
 
-			if e.winerror == 193:
+			if getattr(e, "winerror", None) == 193:
 				print("Failed to load library. \n\nChange the module path to the 32 bit version.")
 				sys.exit(1)
 
 			print(e, "\n\nFailed to lad Windows library. Trying to load Linux library...\n")
 
 			try:
-				dll = ctypes.CDLL('k4abt.so')
+				dll = ctypes.CDLL('libk4abt.so')
 			except Exception as ee:
 				print("Failed to load library", ee)
 				sys.exit(1)
@@ -106,4 +106,3 @@ def VERIFY(result, error):
 		print(error)
 		traceback.print_stack()
 		sys.exit(1)
-

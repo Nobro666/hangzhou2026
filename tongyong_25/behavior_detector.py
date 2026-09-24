@@ -28,6 +28,7 @@
 
 import math
 
+import cv2
 import numpy as np
 
 import _k4abt
@@ -79,12 +80,33 @@ class BehaviorDetector:
         self.ground_y = ground_y
         self.hip_ground = hip_ground
 
+        # 记录各阶段是否成功，确保初始化中途失败时也能安全清理。
+        self.kinect = None
+        self.tracker = None
+        self._device_opened = False
+        self._cameras_started = False
+        self._tracker_started = False
+
         # 打开 Azure Kinect 并启动骨架追踪
-        self.kinect = pyKinectAzure()  # k4a 库用默认 Linux 路径
-        self.kinect.device_open()
-        self.kinect.device_start_cameras()
-        self.kinect.bodyTracker_start(k4abt_lib_path)  # 传入 libk4abt.so 路径
-        self.tracker = self.kinect.body_tracker
+        try:
+            self.kinect = pyKinectAzure()  # k4a 库用默认 Linux 路径
+            self.kinect.device_open()
+            self._device_opened = True
+
+            # 显示画面需要彩色图，Body Tracker 必须有深度图。
+            # 只接收同时包含二者的 Capture，避免把缺少深度的帧送入跟踪器。
+            self.kinect.config.synchronized_images_only = True
+            self.kinect.device_start_cameras()
+            self._cameras_started = True
+
+            self.kinect.bodyTracker_start(k4abt_lib_path)  # 传入 libk4abt.so 路径
+            self.tracker = self.kinect.body_tracker
+            self._tracker_started = True
+        except BaseException:
+            # _k4a.VERIFY() 失败时会抛出 SystemExit，因此这里需要捕获
+            # BaseException，清理已经成功打开的底层资源后再继续抛出。
+            self.close()
+            raise
 
     # ---------- 关节读取 ----------
     def _joint(self, body, name):
@@ -94,19 +116,55 @@ class BehaviorDetector:
             return None
         return np.array([j.position.v[0], j.position.v[1], j.position.v[2]], dtype=float)
 
-    def _update(self):
-        """取一帧并刷新骨架。"""
-        self.kinect.device_get_capture()
-        self.kinect.bodyTracker_update()
+    def _update(self, return_color=False):
+        """取一帧并刷新骨架；需要显示时返回独立的彩色图像副本。"""
+        capture_acquired = False
+        color_image_handle = None
+        color_frame = None
+        try:
+            self.kinect.device_get_capture()
+            capture_acquired = True
 
-    def _get_joints(self):
-        """取一帧，返回第一个有效人体的关节字典 {关节名: np.array 或 None}。无人/失败返回 None。"""
-        self._update()
-        bodies = getattr(self.tracker, "bodiesNow", [])
-        if not bodies:
-            return None
-        body = bodies[0]  # 居家场景每房间 1 人，取第一个
-        return {name: self._joint(body, name) for name in JOINT}
+            if return_color:
+                color_image_handle = self.kinect.capture_get_color_image()
+                if bool(color_image_handle):
+                    # 图像句柄稍后会释放，因此必须复制底层像素数据。
+                    color_frame = self.kinect.image_convert_to_numpy(
+                        color_image_handle
+                    ).copy()
+
+            self.kinect.bodyTracker_update()
+            return color_frame
+        finally:
+            if color_image_handle is not None and bool(color_image_handle):
+                self.kinect.image_release(color_image_handle)
+            # Body Tracker 已经处理完该 Capture 后，归还其底层句柄。
+            if capture_acquired:
+                self.kinect.capture_release()
+
+    def _get_joints(self, return_color=False):
+        """取一帧；可同时返回彩色画面和第一个有效人体的关节。"""
+        frame_acquired = False
+        try:
+            color_frame = self._update(return_color=return_color)
+            frame_acquired = True
+
+            bodies = getattr(self.tracker, "bodiesNow", [])
+            if not bodies:
+                joints = None
+            else:
+                body = bodies[0]  # 居家场景每房间 1 人，取第一个
+
+                # _joint() 返回的是独立的 NumPy 数组，因此释放 Body Frame
+                # 后，下面的关节数据仍然有效。
+                joints = {name: self._joint(body, name) for name in JOINT}
+
+            if return_color:
+                return color_frame, joints
+            return joints
+        finally:
+            if frame_acquired:
+                self.tracker.release_frame()
 
     # ---------- 单帧姿态分类 ----------
     def _classify_pose(self, j):
@@ -165,7 +223,7 @@ class BehaviorDetector:
                 return True
         return False
 
-    def detect_wave(self, frames=15, hit_threshold=5):
+    def detect_wave(self, frames=25, hit_threshold=3):
         """连续多帧检测手腕是否高于鼻子，判定挥手。返回 True/False。"""
         hit = 0
         for _ in range(frames):
@@ -194,35 +252,100 @@ class BehaviorDetector:
             return "挥手"
         return pose
 
+    def show_camera(self):
+        """显示 Kinect 彩色画面和当前静态姿态；按 q 或 Esc 退出。"""
+        label_text = {
+            "站立": "standing",
+            "坐": "sitting",
+            "躺": "lying",
+            "摔倒": "fallen",
+            "挥手": "waving",
+            None: "no body",
+        }
+
+        print("相机画面已打开，按 q 或 Esc 退出")
+        wave_hit = 0
+        try:
+            while True:
+                color_frame, joints = self._get_joints(return_color=True)
+                if color_frame is None:
+                    continue
+
+                # BGRA 彩色流转换为 OpenCV 使用的 BGR 三通道画面。
+                if color_frame.ndim == 3 and color_frame.shape[2] == 4:
+                    display_frame = cv2.cvtColor(
+                        color_frame, cv2.COLOR_BGRA2BGR
+                    )
+                else:
+                    display_frame = color_frame
+
+                pose = self._classify_pose(joints) if joints is not None else None
+                if (
+                    pose == "站立"
+                    and joints is not None
+                    and self._is_wrist_above_nose(joints)
+                ):
+                    wave_hit += 1
+                    if wave_hit >= 3:
+                        pose = "挥手"
+                else:
+                    wave_hit = 0
+
+                cv2.putText(
+                    display_frame,
+                    "Behavior: " + label_text.get(pose, str(pose)),
+                    (30, 50),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    1.0,
+                    (0, 255, 0),
+                    2,
+                    cv2.LINE_AA,
+                )
+                cv2.imshow("Kinect Behavior Detector", display_frame)
+
+                key = cv2.waitKey(1) & 0xFF
+                if key in (ord("q"), 27):
+                    break
+        finally:
+            cv2.destroyAllWindows()
+
     def close(self):
         """释放 Kinect 设备与骨架追踪器(分时独占，用完必须关)。"""
-        try:
-            self.tracker.shutdown()
-        except Exception:
-            pass
-        try:
-            self.tracker.destroyTracker()
-        except Exception:
-            pass
-        try:
-            self.kinect.device_stop_cameras()
-        except Exception:
-            pass
-        try:
-            self.kinect.device_close()
-        except Exception:
-            pass
+        if self._tracker_started and self.tracker is not None:
+            try:
+                self.tracker.shutdown()
+            except Exception:
+                pass
+            try:
+                self.tracker.destroyTracker()
+            except Exception:
+                pass
+            self._tracker_started = False
+            self.tracker = None
+
+        if self._cameras_started and self.kinect is not None:
+            try:
+                self.kinect.device_stop_cameras()
+            except Exception:
+                pass
+            self._cameras_started = False
+
+        if self._device_opened and self.kinect is not None:
+            try:
+                self.kinect.device_close()
+            except Exception:
+                pass
+            self._device_opened = False
+
+        self.kinect = None
 
 
 if __name__ == "__main__":
-    import time
-
     # libk4abt.so 路径按实际环境填（通常与 libk4a.so 同目录）
-    det = BehaviorDetector("/usr/lib/x86_64-linux-gnu/libk4abt.so")
+    det = None
     try:
-        for _ in range(10):
-            label = det.recognize()
-            print("行为:", label)
-            time.sleep(0.2)
+        det = BehaviorDetector("/lib/libk4abt.so")
+        det.show_camera()
     finally:
-        det.close()
+        if det is not None:
+            det.close()
