@@ -34,7 +34,7 @@ class VoskSpeechRecognition:
         self.language = language
         self.log_file = "vosk_speech_recognition_log.txt"
         # self.model_path = "/home/zq/catkin_ws/src/cmoon/src/vosk_speech_recognition/models/vosk-model-en-us-0.22"
-        self.model_path = "/home/zq/catkin_ws/src/cmoon/src/vosk_speech_recognition/models/vosk-model-en-us-0.22-lgraph"
+        self.model_path = "/home/zq/catkin_ws/src/cmoon/src/vosk_speech_recognition/models/vosk-model-small-cn-0.22"
         self.model = None
         self.recognizer = None
         

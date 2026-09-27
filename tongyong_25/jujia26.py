@@ -636,9 +636,9 @@ class Controller:
     def control(self):
         text = None
         self.kinova.close_finger()
-        self.navigator.goto("chu")
-        self.navigator.goto("start")
-        self.speak.speak("已到达入场点")
+        # self.navigator.goto("chu")
+        # self.navigator.goto("start")
+        # self.speak.speak("已到达入场点")
         time.sleep(1)
 
 
