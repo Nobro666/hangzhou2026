@@ -157,7 +157,7 @@ class WebCamera(Camera):
 class ItemsDetector:
     """Core detection class with YOLO model"""
     
-    def __init__(self, model_path='/home/zq/catkin_ws/src/cmoon/src/shijiazhuang_2025/tongyong_25/model/allbest.pt'):
+    def __init__(self, model_path='/home/zq/catkin_ws/src/cmoon/src/hangzhou2026/tongyong_25/model/yolo11m.pt'):
         self.model = YOLO(model_path)
         print(f"内容：{self.model.names}")
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
