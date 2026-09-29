@@ -816,15 +816,29 @@ class Detector:
 #----------------------------------------------------------------------------------------------------------
     def open_k4a(self):
         if not self.is_open:
-            # self.modulePath = r'/usr/lib/x86_64-linux-gnu/libk4a.so'         
-            self.k4a.device_open()
-            device_config = self.k4a.config
-            device_config.color_resolution = _k4a.K4A_COLOR_RESOLUTION_1080P
-            # device_config.depth_mode = _k4a.K4A_DEPTH_MODE_WFOV_2X2BINNED
-            self.k4a.device_start_cameras(device_config)
-            self.is_open = 1
-            time.sleep(1)
-            print("开k4a")
+            device_opened = False
+            try:
+                # self.modulePath = r'/usr/lib/x86_64-linux-gnu/libk4a.so'
+                self.k4a.device_open()
+                device_opened = True
+                device_config = self.k4a.config
+                device_config.color_resolution = _k4a.K4A_COLOR_RESOLUTION_1080P
+                # device_config.depth_mode = _k4a.K4A_DEPTH_MODE_WFOV_2X2BINNED
+                self.k4a.device_start_cameras(device_config)
+                self.is_open = 1
+                time.sleep(1)
+                print("开k4a")
+            except (Exception, SystemExit) as error:
+                # _k4a.VERIFY() 失败时会抛出 SystemExit。
+                # 若设备已经打开但相机启动失败，必须关闭句柄，
+                # 否则下一次打开会出现 LIBUSB_ERROR_BUSY。
+                if device_opened:
+                    try:
+                        self.k4a.device_close()
+                    except Exception as close_error:
+                        print(f"清理K4A设备句柄失败: {close_error}")
+                self.is_open = 0
+                raise RuntimeError("打开K4A相机失败") from error
         else:
             print("k4a已经开启")
 
@@ -883,4 +897,3 @@ if __name__ == "__main__":
     # print(action_type)
 
     
-
