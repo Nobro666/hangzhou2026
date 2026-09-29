@@ -71,8 +71,8 @@ TRUNK_ANGLE_THRESHOLD = 60.0
 # 髋-踝高度差阈值(米)：低于则视为“坐”(站立时整条腿竖直投影应更大)。
 LEG_HEIGHT_SIT_THRESHOLD = 0.7
 
-# 挥手判定：手腕高于鼻子的最小高度差(mm)。
-WAVE_HEIGHT_DIFF = 150.0
+# 挥手判定：手腕高于同侧肩部的最小高度差(mm)。肩部比鼻子低得多，挥手时手无需抬过头顶。
+WAVE_HEIGHT_DIFF = -100.0
 
 
 class BehaviorDetector:
@@ -212,25 +212,28 @@ class BehaviorDetector:
         return "站立"
 
     # ---------- 挥手检测(时序) ----------
-    def _is_wrist_above_nose(self, j):
-        """单帧判断是否有任一手腕明显高于鼻子。"""
-        nose = j.get("NOSE")
-        if nose is None:
-            return False
-        for wrist_name in ("WRIST_LEFT", "WRIST_RIGHT"):
+    def _is_wrist_above_shoulder(self, j):
+        """单帧判断是否有任一手腕明显高于同侧肩部。"""
+        for wrist_name, shoulder_name in (
+            ("WRIST_LEFT", "SHOULDER_LEFT"),
+            ("WRIST_RIGHT", "SHOULDER_RIGHT"),
+        ):
             wrist = j.get(wrist_name)
-            if wrist is not None and (nose[1] - wrist[1]) > WAVE_HEIGHT_DIFF:
+            shoulder = j.get(shoulder_name)
+            if wrist is None or shoulder is None:
+                continue
+            if (shoulder[1] - wrist[1]) > WAVE_HEIGHT_DIFF:
                 return True
         return False
 
     def detect_wave(self, frames=25, hit_threshold=3):
-        """连续多帧检测手腕是否高于鼻子，判定挥手。返回 True/False。"""
+        """连续多帧检测手腕是否高于同侧肩部，判定挥手。返回 True/False。"""
         hit = 0
         for _ in range(frames):
             j = self._get_joints()
             if j is None:
                 continue
-            if self._is_wrist_above_nose(j):
+            if self._is_wrist_above_shoulder(j):
                 hit += 1
             else:
                 hit = 0
@@ -283,7 +286,7 @@ class BehaviorDetector:
                 if (
                     pose == "站立"
                     and joints is not None
-                    and self._is_wrist_above_nose(joints)
+                    and self._is_wrist_above_shoulder(joints)
                 ):
                     wave_hit += 1
                     if wave_hit >= 3:
