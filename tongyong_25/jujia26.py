@@ -67,20 +67,21 @@ LOCATION = {
 }
 
 # 主人要求关键词
-target_keywords = []
+target_keywords = ["开","关"]
 
 # 主人名字
-target_name = []
+target_name = ["张三","李四","王五"]
 
 # ===== 2026-09-20 修改：统一定义行为识别结果，便于后续分发动作 =====
-ACTION_SIT_OR_LIE = "坐下或躺下"
+ACTION_SIT = "坐下"
+ACTION_LIE = "躺下"
 ACTION_FALL = "摔倒"
 ACTION_WAVE = "挥手"
 ACTION_UNKNOWN = "未知行为"
 
 
 class Controller:
-    def __init__(self, name, room,drink):
+    def __init__(self, name):
         print("==============开始初始化==============")
         rospy.init_node(name, anonymous=True)  # 初始化ros节点
         # rospy.Subscriber('/start_signal', String, self.control)  # 创建订阅者订阅recognizer发出的地点作为启动信号
@@ -397,7 +398,7 @@ class Controller:
             if interaction_success:
                 self.recognized_owner_ids.add(face_id)
             room_results.append(observation)
-            
+
             # 三位主人都找到后结束巡游
             if len(self.recognized_owner_ids) >= 3:
                 print("三位主人均已找到")
@@ -531,7 +532,7 @@ class Controller:
         behavior = observation["behavior"]
         person_name = observation["person_name"]
 
-        if behavior == ACTION_SIT_OR_LIE:
+        if behavior == ACTION_SIT or behavior == ACTION_LIE:
             return self.handle_switch_behavior(person_name)
         if behavior == ACTION_FALL:
             return self.handle_fall_behavior(person_name)
