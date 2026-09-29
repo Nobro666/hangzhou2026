@@ -5,3 +5,16 @@
 *.engine
 *.weights
 *.ckpt
+
+# Python-generated cache files.
+__pycache__/
+*.py[cod]
+
+# Runtime-generated voice recordings and recognition logs.
+tongyong_25/audio/*.wav
+tongyong_25/voice_recognition_log.txt
+tongyong_25/vosk_speech_recognition_log.txt
+
+# Runtime-generated face registration data.
+tongyong_25/face/photo.jpg
+tongyong_25/face/[0-9]*/

@@ -35,8 +35,12 @@ class KinectCamera(Camera):
         self.K_kinect = np.array([915.0828247070312, 0.0, 961.7936401367188, 
                                   0.0, 914.6190185546875, 555.453369140625, 
                                   0.0, 0.0, 1.0]).reshape(3,3)
+        self.device = None
     
     def open_camera(self):
+        if self.device is not None:
+            return
+
         import pykinect_azure as pykinect
         from pykinect_azure import (
             K4A_FRAMES_PER_SECOND_30,
@@ -64,8 +68,15 @@ class KinectCamera(Camera):
         return self.K_kinect
         
     def release(self):
-        self.device.stop_cameras()
-        self.device.close()
+        if self.device is None:
+            return
+
+        device = self.device
+        self.device = None
+        try:
+            device.stop_cameras()
+        finally:
+            device.close()
 
 class PersonDetector:
     def __init__(self, model_path='./model/yolo11m.pt'):

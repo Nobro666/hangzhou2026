@@ -57,13 +57,13 @@ from geometry_msgs.msg import PoseWithCovarianceStamped
 
 # 储存导航路径点
 LOCATION = {  
-    "chu":[[],[]],
-    "start":[[],[]],
-    "room0":[[],[]],
-    "room1":[[],[]],
-    "room2":[[],[]],
-    "room3":[[],[]],
-    "over":[[],[]]
+    "chu":[[0.10528231323935666,-0.07509295495687326,0.138],[0.0,0.0,0.0053423071277963925,0.9999857297754565]],
+    "start":[[0.10528231323935666,-0.07509295495687326,0.138],[0.0,0.0,0.0053423071277963925,0.9999857297754565]],
+    "room0":[[1.2703725035133533,-0.35325321400655685,0.13800000000000004],[0.0,0.0,0.005915822422323317,0.9999825013694327]],
+    "room1":[[1.9122668550954658,-0.3784482835162455,0.13799999999999998],[0.0,0.0,0.0033810126717031125,0.9999942843603226]],
+    "room2":[[2.3588365454624434,-0.3901218696327931,0.13800000000000004],[0.0,0.0,-0.048092393938254326,0.998842891372456]],
+    "room3":[[2.921499798866684,-0.3978212835564952,0.13800000000000004],[0.0,0.0,-0.02891080342808905,0.9995819953586311]],
+    "over":[[4.079833045916185,-0.3118363099353716,0.13799999999999998],[0.0,0.0,0.012550201701563646,0.9999212431173018]]
 }
 
 # 主人要求关键词
@@ -100,7 +100,7 @@ class Controller:
         self.camera = KinectCamera()
         self.people_detector = PersonDetector()
         self.items_detector = ItemsDetector()
-        self.photo_path = '/home/zq/catkin_ws/src/cmoon/src/shijiazhuang_2025/tongyong_25/face'  # 替换为你想要保存照片的路径
+        self.photo_path = '/home/zq/catkin_ws/src/cmoon/src/hangzhou2026/tongyong_25/face'  # 替换为你想要保存照片的路径
         self.face = Detector(self.photo_path)
         print("==============视觉初始化完成==============")
 
@@ -151,14 +151,14 @@ class Controller:
         wait_duration = 5.0 
 
         # 2. 设置你的机器人在 'map' 坐标系下的初始坐标 (单位：米)
-        pos_x = 0.2640757750552908  # <-- 在这里填入你的X坐标
-        pos_y = -0.011357155403294445  # <-- 在这里填入你的Y坐标
+        pos_x = 0.07749469922910823  # <-- 在这里填入你的X坐标
+        pos_y = -0.5406383437823923  # <-- 在这里填入你的Y坐标
         
         # 3. 设置你的机器人的初始朝向 (四元数)
         quat_x = 0.0  # <-- 在这里填入你的四元数X
         quat_y = 0.0  # <-- 在这里填入你的四元数Y
-        quat_z = -0.008099910362467287  # <-- 在这里填入你的四元数Z
-        quat_w = 0.9999671951879822  # <-- 在这里填入你的四元数W
+        quat_z = 0.008212284556930885  # <-- 在这里填入你的四元数Z
+        quat_w = 0.9999662786226123  # <-- 在这里填入你的四元数W
         # --- 配置结束 ---
 
         # 创建一个发布者，发布到 /initialpose 话题
@@ -215,27 +215,45 @@ class Controller:
         owner_index = id
         person_id = None
         person_name = None
+        max_attempts = 3
+        face_attempts = 0
+        speech_attempts = 0
         self.speak.speak(f"请主人{owner_index}站在我面前，保持静止")
         time.sleep(1)
 
-        while person_id is None and not rospy.is_shutdown():
+        while (person_id is None and
+               face_attempts < max_attempts and
+               not rospy.is_shutdown()):
+            face_attempts += 1
             self.speak.speak("开始人脸注册，请看向我")
             time.sleep(0.5)
-            print(">>> 正在进行人脸注册...")
+            print(f">>> 正在进行人脸注册...（第{face_attempts}/{max_attempts}次）")
             try:
                 # 调用register_new_face() 
                 person_id = self.face.register_new_face()
             except Exception as error:
                 print(f"人脸注册发生异常: {error}")
                 person_id = None
+            finally:
+                # 人脸模块和房间人物检测使用不同的 K4A 封装。
+                # 每次注册尝试后都释放相机，避免巡游时重复打开设备。
+                try:
+                    self.face.close_k4a()
+                except Exception as close_error:
+                    print(f"关闭人脸相机发生异常: {close_error}")
 
             if person_id is None:
                 print("未检测到有效人脸")
-                self.speak.speak("注册失败，请再试一次")
-                time.sleep(1)
+                if face_attempts < max_attempts:
+                    self.speak.speak("注册失败，请再试一次")
+                    time.sleep(1)
 
         if person_id is None:
-            print("ROS 已关闭，人脸注册终止")
+            if rospy.is_shutdown():
+                print("ROS 已关闭，人脸注册终止")
+            else:
+                print(f"人脸检测已达到最大尝试次数（{max_attempts}次）")
+                self.speak.speak("人脸注册失败")
             return None
 
         print(f"人脸注册成功，ID: {person_id}")
@@ -248,13 +266,22 @@ class Controller:
 
         print(">>> [阶段2] 正在采集姓名...")
 
-        while person_name is None and not rospy.is_shutdown():
+        while (person_name is None and
+               speech_attempts < max_attempts and
+               not rospy.is_shutdown()):
+            speech_attempts += 1
             self.speak.speak("你叫什么名字？")
             time.sleep(0.5)
 
-            text0, audio_file = record_and_recognize('zh',duration=5)
-            print(f"录音文件: {audio_file}")
-            print(f"姓名识别结果: {text0}")
+            print(f">>> 正在进行姓名语音识别...（第{speech_attempts}/{max_attempts}次）")
+            text0 = None
+            audio_file = None
+            try:
+                text0, audio_file = record_and_recognize('zh',duration=5)
+                print(f"录音文件: {audio_file}")
+                print(f"姓名识别结果: {text0}")
+            except Exception as error:
+                print(f"姓名语音识别发生异常: {error}")
             matched_name = None
             try:
                 if text0 is not None:
@@ -274,11 +301,16 @@ class Controller:
                 person_name = matched_name
                 self.speak.speak(f"好的，{person_name}")
                 break
-            self.speak.speak("没有听清，请再说一遍")
-            time.sleep(1)
+            if speech_attempts < max_attempts:
+                self.speak.speak("没有听清，请再说一遍")
+                time.sleep(1)
 
         if person_name is None:
-            print("ROS 已关闭，姓名采集终止")
+            if rospy.is_shutdown():
+                print("ROS 已关闭，姓名采集终止")
+            else:
+                print(f"语音识别已达到最大尝试次数（{max_attempts}次）")
+                self.speak.speak("姓名识别失败，已达到最大尝试次数")
             return None
 
         # --------------------------------------------------------------
