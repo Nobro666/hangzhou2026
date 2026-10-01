@@ -72,7 +72,7 @@ LOCATION = {
 target_keywords = ["开","关"]
 
 # 主人名字
-target_name = ["一","二","三"]
+target_name = ["张三","李四","赵二"]
 
 # ===== 2026-09-20 修改：统一定义行为识别结果，便于后续分发动作 =====
 ACTION_SIT = "坐下"
@@ -231,8 +231,15 @@ class Controller:
             time.sleep(0.5)
             print(f">>> 正在进行人脸注册...（第{face_attempts}/{max_attempts}次）")
             try:
-                # 调用register_new_face() 
-                person_id = self.face.register_new_face()
+                # ===== 2026-10-01 修改：注册侧脸前播报左转、右转提示 START =====
+                person_id = self.face.register_new_face(
+                    prompt_callback=lambda prompt: self.speak.speak(
+                        prompt,
+                        wait_done=True,
+                        timeout=30.0,
+                    )
+                )
+                # ===== 2026-10-01 修改：注册侧脸前播报左转、右转提示 END =====
             except Exception as error:
                 print(f"人脸注册发生异常: {error}")
                 person_id = None

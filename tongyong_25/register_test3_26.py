@@ -79,7 +79,14 @@ def register_owner(controller, owner_index):
         )
 
         try:
-            person_id = controller.face.register_new_face()
+            # ===== 2026-10-01 修改：注册侧脸前播报左转、右转提示 START =====
+            person_id = controller.face.register_new_face(
+                prompt_callback=lambda prompt: controller.voice.say(
+                    prompt,
+                    wait=True,
+                )
+            )
+            # ===== 2026-10-01 修改：注册侧脸前播报左转、右转提示 END =====
         except Exception as error:
             print(f"人脸注册发生异常：{error}")
             person_id = None
