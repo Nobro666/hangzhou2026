@@ -70,7 +70,7 @@ LOCATION = {
 target_keywords = ["开","关"]
 
 # 主人名字
-target_name = ["张三","李四","王五"]
+target_name = ["一","二","三"]
 
 # ===== 2026-09-20 修改：统一定义行为识别结果，便于后续分发动作 =====
 ACTION_SIT = "坐下"
@@ -731,7 +731,7 @@ if __name__ == '__main__':
     parser.add_argument('--d', type=int, required=False, default = 1)
     opt = parser.parse_args()
     try:
-        Controller('reception', opt.r, opt.d)  # 实例化Controller,参数为初始化ros节点使用到的名字
+        Controller('reception')  # 实例化Controller,参数为初始化ros节点使用到的名字
         rospy.spin()  # 保持监听订阅者订阅的话题，直到节点已经关闭
     except rospy.ROSInterruptException:
         pass
