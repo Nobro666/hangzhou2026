@@ -63,14 +63,16 @@ LOCATION = {
     "room1":[[1.9122668550954658,-0.3784482835162455,0.13799999999999998],[0.0,0.0,0.0033810126717031125,0.9999942843603226]],
     "room2":[[2.3588365454624434,-0.3901218696327931,0.13800000000000004],[0.0,0.0,-0.048092393938254326,0.998842891372456]],
     "room3":[[2.921499798866684,-0.3978212835564952,0.13800000000000004],[0.0,0.0,-0.02891080342808905,0.9995819953586311]],
-    "over":[[4.079833045916185,-0.3118363099353716,0.13799999999999998],[0.0,0.0,0.012550201701563646,0.9999212431173018]]
+    "over":[[4.079833045916185,-0.3118363099353716,0.13799999999999998],[0.0,0.0,0.012550201701563646,0.9999212431173018]],
+    "switch":[],
+    "trash_can":[]
 }
 
 # 主人要求关键词
 target_keywords = ["开","关"]
 
 # 主人名字
-target_name = ["张三","李四","王五"]
+target_name = ["一","二","三"]
 
 # ===== 2026-09-20 修改：统一定义行为识别结果，便于后续分发动作 =====
 ACTION_SIT = "坐下"
@@ -310,7 +312,7 @@ class Controller:
                 print("ROS 已关闭，姓名采集终止")
             else:
                 print(f"语音识别已达到最大尝试次数（{max_attempts}次）")
-                self.speak.speak("姓名识别失败，已达到最大尝试次数")
+                self.speak.speak("姓名识别失败")
             return None
 
         # --------------------------------------------------------------
@@ -494,7 +496,6 @@ class Controller:
         """
         根据人物地图坐标，导航到人物附近的安全位置。
         """
-
         person_goal = (self.goalpoint.find_best_goal(person_map))
         if person_goal is None:
             print("没有找到人物附近的安全导航点")
@@ -623,7 +624,7 @@ class Controller:
     def handle_fall_behavior(self, person_name):
         """主人摔倒：定位人体、执行机械臂动作。"""
 
-        self.speak.speak(f"{person_name}，请保持不动，我来帮助你")
+        self.speak.speak(f"{person_name}，我来帮助你")
 
         # 1. 获取摔倒主人的身体位置
         body_position = None
@@ -731,7 +732,7 @@ if __name__ == '__main__':
     parser.add_argument('--d', type=int, required=False, default = 1)
     opt = parser.parse_args()
     try:
-        Controller('reception', opt.r, opt.d)  # 实例化Controller,参数为初始化ros节点使用到的名字
+        Controller('jujia26')  # 实例化Controller,参数为初始化ros节点使用到的名字
         rospy.spin()  # 保持监听订阅者订阅的话题，直到节点已经关闭
     except rospy.ROSInterruptException:
         pass

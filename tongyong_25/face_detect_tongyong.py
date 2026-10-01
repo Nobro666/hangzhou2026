@@ -21,6 +21,12 @@ main函数调用方法:
     camera.detect_result
 """
 
+"""
+2026.9.30修改
+添加左侧、右侧照片采集，提高识别稳定性
+注册前检查是否已经注册，避免同一个人产生多个 ID
+"""
+
 class Detector:
     def __init__(self, photopath, device = 'k4a'):
         self.photopath = photopath  # 定义照片保存的路径
@@ -71,60 +77,6 @@ class Detector:
         
         return [point_3d[0], point_3d[1], point_3d[2]]  # (x, y, z)
 
-    #检测人
-    # def person_detect(self):
-    #     if self.device == 'k4a' or self.device == 'kinect':
-    #         self.open_k4a()
-    #
-    #         # 捕获图像
-    #         while True:
-    #             self.k4a.device_get_capture()
-    #             color_image_handle = self.k4a.capture_get_color_image()
-    #             depth_image_handle = self.k4a.capture_get_depth_image()
-    #             if color_image_handle:
-    #                 self.color_image_handle = color_image_handle
-    #                 self.depth_image_handle = depth_image_handle
-    #                 color_image = self.k4a.image_convert_to_numpy(color_image_handle)
-    #                 break
-    #         results = []
-    #         # 检测
-    #
-    #         results = self.model(color_image)
-    #         try:
-    #             keypoints = results[0].keypoints[0][0]
-    #             if keypoints.shape[0] > 0:
-    #                 # nose = keypoints[0][0]
-    #                 # print(nose)
-    #                 # 定义保存照片的路径
-    #                 path = self.photopath + '/photo.jpg'
-    #                 x,y = keypoints.xy[0][0]
-    #                 # 有鼻子就拿深度
-    #                 depth_image = self.k4a.transform_depth_to_color(self.depth_image_handle, self.color_image_handle)
-    #
-    #                 base_3d_point = self.get_person_3d_coords(depth_image, int(x), int(y))
-    #                 # 保存图片
-    #                 color_image = self.k4a.image_convert_to_numpy(color_image_handle)
-    #                 # color_image = color_image[0:1080,800:1120]
-    #                 cv2.imwrite(path, color_image)
-    #                 # ------ 新增：显示并标注 ------
-    #                 # cv2.circle(color_image, (int(x), int(y)), 8, (0, 0, 255), -1)
-    #                 # # cv2.putText(color_image, f"{person_depth} mm", (int(x) + 10, int(y) - 10),
-    #                 # #             cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
-    #                 # cv2.imshow("Nose depth (press Q to continue)", color_image)
-    #                 # if cv2.waitKey(0) & 0xFF == ord('q'):
-    #                 #     cv2.destroyAllWindows()
-    #                 # --------------------------------
-    #                 # camera.k4a.device_stop_cameras()
-    #                 # camera.k4a.device_close()
-    #                 # self.close_k4a()
-    #                 return base_3d_point, path, x, y
-    #             else:
-    #                 print('未检测到鼻子')
-    #                 # self.close_k4a()
-    #                 return None, None, 0, 0
-    #         except:
-    #             print('未检测到人')
-    #             return None, None, 0, 0
 
 #----------------------------------------------------------------------------------------------------------
 # 人脸检测部分
@@ -412,128 +364,155 @@ class Detector:
         else:
             print("未找到主人")
 
-    # def register_new_face(self, img_path = None):
-    #     # 注册新人脸
-    #     print("开始注册人脸")
-    #     if img_path == None:
-    #         img_path = self.photopath
-    #     img_path = self.take_photo(self.device)
-    #     face = self.detect_faces(img_path)
-    #     reg_num = 0
-    #     if face:
-    #         # if self.detect_known_faces(img_path, face) == 0: # 判断是否注册过
-    #         for folder_name in os.listdir(self.photopath):  # 在注册过的人脸文件夹数字之后再建立新文件夹
-    #             if folder_name.isdigit():  # 确保是数字编号的文件夹
-    #                 self.face_id_counter = int(folder_name)
-    #
-    #         self.face_id_counter += 1
-    #         new_person_id = self.face_id_counter
-    #
-    #         new_folder_path = os.path.join(self.photopath, str(new_person_id))
-    #         self.face_folders[new_person_id] = new_folder_path
-    #         os.makedirs(new_folder_path, exist_ok=True)
-    #         img = cv2.imread(img_path)
-    #
-    #         facial_area = face["facial_area"]
-    #         x, y, w, h = facial_area["x"], facial_area["y"], facial_area["w"], facial_area["h"]
-    #         face_img = img[y:y+h, x:x+w]    # 裁剪人脸区域
-    #
-    #         self.save_face_image(face_img, new_person_id)
-    #         print(f"注册新人脸: {new_person_id}")
-    #         self.detect_result = new_person_id
-    #
-    #         while(reg_num < 2):
-    #             if reg_num == 0:
-    #                 print("请向左转一点")
-    #             else:
-    #                 print("请向右转一点")
-    #             time.sleep(3)
-    #             img_path = self.take_photo(self.device)
-    #             face = self.detect_faces(img_path)
-    #             if face:
-    #                 facial_area = face["facial_area"]
-    #                 x, y, w, h = facial_area["x"], facial_area["y"], facial_area["w"], facial_area["h"]
-    #                 img = cv2.imread(img_path)
-    #                 face_img = img[y:y+h, x:x+w]    # 裁剪人脸区域
-    #                 self.save_face_image(face_img, new_person_id)
-    #                 reg_num += 1
-    #             else:
-    #                 print("未检测到人脸，两秒后将再试一次")
-    #                 time.sleep(2)
-    #         # self.close_k4a()
-    #         print("正在更新特征向量平均值...")
-    #         self.update_known_faces()
-    #         return 1
-    #         # else:
-    #         #     print("已经注册过该人脸")
-    #         #     # self.close_k4a()
-    #         #     return 0
-    #     else:
-    #         return 0
+
+    def _find_registered_face(self, face, threshold=0.5):
+        """将检测到的人脸与已注册特征比较，返回已有 ID 和距离。"""
+        if not self.known_faces:
+            return None, float('inf')
+
+        new_image_embedding = DeepFace.represent(
+            img_path=face["face"],
+            model_name='VGG-Face',
+            enforce_detection=False,
+            detector_backend="retinaface",
+            align=True
+        )[0]["embedding"]
+
+        best_match = None
+        best_distance = float('inf')
+        for person_id, known_embedding in self.known_faces.items():
+            distance = 1 - np.dot(
+                known_embedding,
+                new_image_embedding
+            ) / (
+                np.linalg.norm(known_embedding)
+                * np.linalg.norm(new_image_embedding)
+            )
+            print(f"注册前人脸匹配差异: ID={person_id}, distance={distance}")
+            if distance < best_distance:
+                best_distance = distance
+                best_match = person_id
+
+        if best_match is not None and best_distance < threshold:
+            return best_match, best_distance
+        return None, best_distance
+
+    def _capture_face_for_registration(self, person_id, prompt,
+                                       max_attempts=3):
+        """按指定朝向采集一张人脸，避免未检测到时无限等待。"""
+        for attempt in range(1, max_attempts + 1):
+            print(f"{prompt}（第{attempt}/{max_attempts}次）")
+            time.sleep(3 if attempt == 1 else 2)
+
+            img_path = self.take_photo(self.device)
+            face = self.detect_faces(img_path)
+            if face is None:
+                print("未检测到人脸")
+                continue
+
+            img = cv2.imread(img_path)
+            facial_area = face["facial_area"]
+            x = facial_area["x"]
+            y = facial_area["y"]
+            w = facial_area["w"]
+            h = facial_area["h"]
+            face_img = img[y:y+h, x:x+w]
+            self.save_face_image(face_img, person_id)
+            return True
+
+        print(f"{prompt}的人脸采集失败，跳过该角度")
+        return False
+
+    def _save_front_face_for_registration(self, person_id, img_path, face):
+        """保存首次检测到的正面人脸照片。"""
+        img = cv2.imread(img_path)
+        facial_area = face["facial_area"]
+        x = facial_area["x"]
+        y = facial_area["y"]
+        w = facial_area["w"]
+        h = facial_area["h"]
+        face_img = img[y:y+h, x:x+w]
+        self.save_face_image(face_img, person_id)
+        print(f"注册新人脸: {person_id}，正面照片采集成功")
+
+    def _register_front_only(self, person_id, img_path, face):
+        """方案一：只保存一张正面人脸照片。"""
+        self._save_front_face_for_registration(person_id, img_path, face)
+        return 1
+
+    def _register_front_and_sides(self, person_id, img_path, face):
+        """方案二：保存正面、左侧和右侧人脸照片。"""
+        self._save_front_face_for_registration(person_id, img_path, face)
+        saved_face_count = 1
+
+        if self._capture_face_for_registration(
+            person_id,
+            "请向左转一点"
+        ):
+            saved_face_count += 1
+        if self._capture_face_for_registration(
+            person_id,
+            "请向右转一点"
+        ):
+            saved_face_count += 1
+
+        return saved_face_count
 
     def register_new_face(self, img_path=None):
-
-    # 注册新人脸
+        """注册新人脸；通过注释调用行选择单张或三张采集方案。"""
         print("开始注册人脸")
-        # if img_path == None:
-        #     img_path = self.photopath
         img_path = self.take_photo(self.device)
         face = self.detect_faces(img_path)
-        reg_num = 0
-        if face:
-            max_id=0
-            # if self.detect_known_faces(img_path, face) == 0: # 判断是否注册过
-            for folder_name in os.listdir(self.photopath):  # 在注册过的人脸文件夹数字之后再建立新文件夹
-                if folder_name.isdigit():  # 确保是数字编号的文件夹
-                    if folder_name.isdigit():
-                        if int(folder_name)>max_id:
-                            max_id=int (folder_name)
-            self.face_id_counter = max_id
-
-            self.face_id_counter += 1
-            new_person_id = self.face_id_counter
-
-            new_folder_path = os.path.join(self.photopath, str(new_person_id))
-            self.face_folders[new_person_id] = new_folder_path
-            os.makedirs(new_folder_path, exist_ok=True)
-            img = cv2.imread(img_path)
-
-            facial_area = face["facial_area"]
-            x, y, w, h = facial_area["x"], facial_area["y"], facial_area["w"], facial_area["h"]
-            face_img = img[y:y+h, x:x+w]    # 裁剪人脸区域
-
-            self.save_face_image(face_img, new_person_id)
-            print(f"注册新人脸: {new_person_id}")
-            self.detect_result = new_person_id
-
-            # while(reg_num < 2):
-            #     if reg_num == 0:
-            #         print("请向左转一点")
-            #     else:
-            #         print("请向右转一点")
-            #     time.sleep(3)
-            #     img_path = self.take_photo(self.device)
-            #     face = self.detect_faces(img_path)
-            #     if face:
-            #         facial_area = face["facial_area"]
-            #         x, y, w, h = facial_area["x"], facial_area["y"], facial_area["w"], facial_area["h"]
-            #         img = cv2.imread(img_path)
-            #         face_img = img[y:y+h, x:x+w]    # 裁剪人脸区域
-            #         self.save_face_image(face_img, new_person_id)
-            #         reg_num += 1
-            #     else:
-            #         print("未检测到人脸，两秒后将再试一次")
-            #         time.sleep(2)
-            # self.close_k4a()
-            print("正在更新特征向量平均值...")
-            self.update_known_faces()
-            return new_person_id
-            # else:
-            #     print("已经注册过该人脸")
-            #     # self.close_k4a()
-            #     return 0
-        else:
+        if face is None:
             return None
+
+        # 创建新 ID 前先检查是否已经注册，避免重复建立人脸目录。
+        existing_person_id, best_distance = self._find_registered_face(face)
+        if existing_person_id is not None:
+            self.detect_result = existing_person_id
+            print(
+                f"该人脸已经注册，已有ID: {existing_person_id}，"
+                f"距离: {best_distance}"
+            )
+            return None
+
+        max_id = 0
+        for folder_name in os.listdir(self.photopath):
+            if folder_name.isdigit() and int(folder_name) > max_id:
+                max_id = int(folder_name)
+        self.face_id_counter = max_id + 1
+        new_person_id = self.face_id_counter
+
+        new_folder_path = os.path.join(self.photopath, str(new_person_id))
+        self.face_folders[new_person_id] = new_folder_path
+        os.makedirs(new_folder_path, exist_ok=True)
+
+        # --------------------------------------------------------------
+        # 人脸注册采集方案：两种方案只能启用一种。
+        # --------------------------------------------------------------
+
+        # 方案一：只拍一张正脸。
+        saved_face_count = self._register_front_only(
+            new_person_id,
+            img_path,
+            face
+        )
+
+        # 方案二：拍正面、左侧和右侧三张照片。
+        # saved_face_count = self._register_front_and_sides(
+        #     new_person_id,
+        #     img_path,
+        #     face
+        # )
+
+        self.detect_result = new_person_id
+        print(
+            f"人脸ID {new_person_id} 共保存 "
+            f"{saved_face_count} 张注册照片"
+        )
+        print("正在更新特征向量平均值...")
+        self.update_known_faces()
+        return new_person_id
 
 
 
@@ -609,211 +588,7 @@ class Detector:
         else:
             print("文件夹不存在，无法删除。")
 
-#----------------------------------------------------------------------------------------------------------
-#----------------------------------------------------------------------------------------------------------
-# # 姿态检测部分
-#     def pose_detect(self, key="feet"):
-#         """
-#             检测人体关键点，并根据传入参数返回对应的关键点信息
-#         """
-#         try:
-#             if self.device == 'k4a' or self.device == 'kinect':
-#                 self.open_k4a()
-#                 # 捕获图像
-#                 while True:
-#                     self.k4a.device_get_capture()
-#                     color_image_handle = self.k4a.capture_get_color_image()
-#                     depth_image_handle = self.k4a.capture_get_depth_image()
-#                     if color_image_handle:
-#                         self.color_image_handle = color_image_handle
-#                         self.depth_image_handle = depth_image_handle
-#                         color_image = self.k4a.image_convert_to_numpy(color_image_handle)
-#                         break
-#
-#             results = self.model(color_image)
-#             # color_frame = results[0].plot()
-#             color_frame = color_image.copy()
-#             keypoint_rs = results[0].keypoints
-#             keypoint = keypoint_rs.xy
-#             results = []
-#             if keypoint_rs.shape[1] > 0:
-#                 color_frame = self.draw_skeleton(color_frame, keypoint[0])
-#                 if key == "hand":
-#                     left_wrist = keypoint[0][9] # 索引 9 是左腕
-#                     right_wrist = keypoint[0][10]
-#                     print(f"left_wrist: {left_wrist}")
-#                     print(f"right_wrist: {right_wrist}")
-#                     results = [left_wrist,right_wrist]
-#                 elif key == "foot":
-#                     left_foot = keypoint[0][15]
-#                     right_foot = keypoint[0][16]
-#                     print(f"left_foot: {left_foot}")
-#                     print(f"right_foot: {right_foot}")
-#                     results = [left_foot,right_foot]
-#                 #     xyn = result.keypoints.xyn  # normalized
-#                 #     kpts = result.keypoints.data  # x, y, visibility (if available)
-#                 #     print(f"xy: {xy}")
-#                 #     print(f"xyn: {xyn}")
-#                 #     print(f"kpts: {kpts}")
-#             # self.close_k4a()
-#             return results, color_frame
-#         except:
-#             # self.close_k4a()
-#             return None, None
-#
-#     def draw_skeleton(self, image, keypoints):
-#         """
-#         在图像上绘制人体骨架
-#         image: 原始图像
-#         keypoints: 人体关键点列表（shape: [17, 2]，每个元素为(x, y)坐标）
-#         """
-#
-#
-#         # 定义骨架连接（每个元组代表两个关键点的索引，构成一条骨骼线）
-#         self.skeleton = [
-#             (0, 1), (0, 2),  # 鼻子-左眼，鼻子-右眼
-#             (1, 3), (2, 4),  # 左眼-左耳，右眼-右耳
-#             (5, 6),  # 左肩-右肩
-#             (5, 7), (7, 9),  # 左肩-左肘-左腕
-#             (6, 8), (8, 10), # 右肩-右肘-右腕
-#             (11, 12), # 左髋-右髋
-#             (5, 11), (6, 12), # 左肩-左髋，右肩-右髋
-#             (11, 13), (13, 15), # 左髋-左膝-左脚踝
-#             (12, 14), (14, 16)  # 右髋-右膝-右脚踝
-#         ]
-#         # 定义骨架线条颜色（BGR格式）
-#         self.skeleton_color = (0, 255, 255)  # 黄色
-#         # 定义关键点颜色和大小
-#         self.keypoint_color = (0, 0, 255)    # 红色
-#         self.keypoint_radius = 3
-#
-#         # 绘制关键点
-#         for kp in keypoints:
-#             x, y = int(kp[0]), int(kp[1])
-#             if x > 0 and y > 0:  # 过滤无效关键点
-#                 cv2.circle(image, (x, y), self.keypoint_radius, self.keypoint_color, -1)
-#
-#         # 绘制骨骼连接
-#         for (i, j) in self.skeleton:
-#             kp1 = keypoints[i]
-#             kp2 = keypoints[j]
-#             x1, y1 = int(kp1[0]), int(kp1[1])
-#             x2, y2 = int(kp2[0]), int(kp2[1])
-#             # 只绘制有效关键点之间的连接
-#             if x1 > 0 and y1 > 0 and x2 > 0 and y2 > 0:
-#                 cv2.line(image, (x1, y1), (x2, y2), self.skeleton_color, 2)
-#
-#         return image
-#
-#     def detect_pose_type(self, person_kps, width, x1, x2, y1 ,y2):
-#         """
-#         检测人体姿势类型
-#         返回: (pose_type, distance)
-#         pose_type: 0-站立不挥手, 1-挥手, 2-躺下
-#         """
-#         # 获取关键节点
-#         left_wrist = person_kps[9]
-#         right_wrist = person_kps[10]
-#         nose = person_kps[0]
-#         left_hip = person_kps[11]
-#         right_hip = person_kps[12]
-#         left_ankle = person_kps[15]
-#         right_ankle = person_kps[16]
-#
-#
-#         # 检测是否躺下
-#         people_height = abs(y1 - y2)
-#         people_width = abs(x1 - x2)
-#
-#         # 计算肩宽
-#         # shoulder_width = math.sqrt((abs(person_kps[6].tolist()[0] - person_kps[5].tolist()[0])) ** 2 + (abs(person_kps[6].tolist()[1] - person_kps[5].tolist()[1])) ** 2)
-#
-#         # print(f"height:{height},shoulder_width:{shoulder_width}")
-#         print(f"people_height:{people_height},people_width:{people_width}")
-#
-#
-#         # 如果宽高比大于0.8，判断为躺下
-#         # if (shoulder_width / height) > 0.3:
-#         if people_width > people_height * 1.2:
-#             return 2  # 躺下
-#
-#         # 先检测是否挥手（保持原有逻辑）
-#         x, y = nose.tolist()
-#         range_val = 0.5
-#         if (left_wrist.tolist()[1] > 1 and left_wrist.tolist()[1] < y and (width * 0.5 * (1 - range_val) < x < width * 0.5 * (1 + range_val))):
-#             return 1  # 挥手
-#
-#         if (right_wrist.tolist()[1] > 1 and right_wrist.tolist()[1] < y and (width * 0.5 * (1 - range_val) < x < width * 0.5 * (1 + range_val))):
-#             return 1  # 挥手
-#         # 否则判断为站立不挥手
-#         return 0
-#
-#     def wave(self):
-#         """
-#         扩展原有挥手检测功能，同时检测站立不挥手和躺下动作
-#         返回: (action_flag, action_type, distance, pose_image, color_image)
-#         action_type: 0-站立不挥手, 1-挥手, 2-躺下
-#         """
-#         try:
-#             if self.device == 'k4a' or self.device == 'kinect':
-#                     self.open_k4a()
-#             # 捕获图像
-#             while True:
-#                 self.k4a.device_get_capture()
-#                 color_image_handle = self.k4a.capture_get_color_image()
-#                 depth_image_handle = self.k4a.capture_get_depth_image()
-#                 if color_image_handle:
-#                     self.color_image_handle = color_image_handle
-#                     self.depth_image_handle = depth_image_handle
-#                     color_image = self.k4a.image_convert_to_numpy(color_image_handle)
-#                     break
-#
-#             cv2.namedWindow('find_wave', cv2.WINDOW_NORMAL)
-#             action_flag = False
-#             action_type = -1  # 默认未检测到有效动作
-#             distance = 0.0
-#             results = self.model(color_image)
-#             pose_image = results[0].plot()
-#             height, width = color_image.shape[:2]
-#
-#             keypoint_rs = results[0].keypoints
-#
-#             if keypoint_rs.shape[1] > 0:
-#                 for person_idx, person_kps in enumerate(keypoint_rs.xy):
-#                     # 检测姿势类型和距离
-#
-#                     x1, y1, x2, y2 = map(int, results[0].boxes[person_idx].xyxy[0].tolist())
-#                     print(f"x1:{x1},y1:{y1},x2:{x2},y2:{y2}")
-#                     pose_type = self.detect_pose_type(person_kps, width, x1, x2, y1, y2)
-#
-#                     if pose_type != -1:
-#                         action_flag = True
-#                         action_type = pose_type
-#
-#                         # 绘制对应标签
-#                         color_image = self.draw_skeleton(color_image, person_kps)
-#                         x1, y1, x2, y2 = map(int, results[0].boxes[person_idx].xyxy[0].tolist())
-#                         labels = ["Standing", "Waving", "Lying"]
-#                         cv2.rectangle(color_image, (x1, y1), (x2, y2), (0, 255, 0), 2)
-#                         cv2.putText(color_image,
-#                                     f'{labels[pose_type]}',
-#                                     (x1, y1-10),
-#                                     cv2.FONT_HERSHEY_SIMPLEX, 5, (0, 255, 0), 1)
-#
-#                         # 保存图像
-#                         now = datetime.now().strftime('%H:%M:%S')
-#                         # cv2.imwrite(f"{labels[pose_type]}{now}.jpg", color_image)
-#                         cv2.imshow('find_wave', color_image)
-#                         # if cv2.waitKey(0) & 0xFF == ord('q'):
-#                         #     cv2.destroyAllWindows()
-#                         break
-#             # self.close_k4a()
-#             return action_type
-#         except:
-#             # self.close_k4a()
-#             return None
 
-#----------------------------------------------------------------------------------------------------------
     def open_k4a(self):
         if not self.is_open:
             device_opened = False
