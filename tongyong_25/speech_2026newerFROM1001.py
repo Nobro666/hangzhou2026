@@ -569,52 +569,6 @@ class CompetitionVoiceService:
             print("[TTS等待] 播报等待结束，下一步将开始录音/识别")
         # ===== 2026-09-30 语音监听时序修正 END =====
 
-    def ask_raw_text(
-        self,
-        prompt: str,
-        duration: float = 5.0,
-        retries: int = 3,
-        repeat: bool = True,
-        repeat_template: str = "你说的是，{}",
-        retry_prompt: str = "没有听清，请再说一遍",
-        free_grammar: bool = True,
-    ) -> str:
-        """
-        固定话术播报 -> 等待 TTS 完成 -> 录音识别 -> 原文复述。
-
-        这是当前主流程推荐使用的“交互原话”接口：不切割词条、不匹配关键词，
-        只返回 Vosk 识别出的原始文本，并可按 repeat_template 复述。
-        free_grammar=True 时临时关闭 grammar，避免词条不完整时被强行匹配到固定词表。
-        """
-        last_text = ""
-        for attempt in range(1, retries + 1):
-            if rospy.is_shutdown():
-                return last_text
-
-            self.say(prompt, wait=True)
-
-            old_grammar = list(self.recognizer.grammar) if self.recognizer.grammar else None
-            if free_grammar:
-                self.recognizer.reset_grammar(None)
-            try:
-                result = self.recognizer.listen_once(duration=duration)
-            finally:
-                if free_grammar:
-                    self.recognizer.reset_grammar(old_grammar)
-
-            text = (result.text or "").strip()
-            last_text = text
-            print(f"[语音交互原文] 第 {attempt}/{retries} 次：{text}")
-            if text:
-                if repeat:
-                    self.say(repeat_template.format(text), wait=True)
-                return text
-
-            if attempt < retries:
-                self.say(retry_prompt, wait=True)
-
-        return last_text
-
     # ===== 2026-09-30 赛规语音覆盖补充 START =====
     # 以下 announce_* 方法不做识别，只负责把主流程/视觉/行为识别结果用统一话术播报。
     # 这样居家生活赛项 jujia26.py 和具身服务/智能赛项 zhineng 主流程都可以复用本文件。
