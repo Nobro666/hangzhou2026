@@ -36,6 +36,7 @@ unzip vosk-model-small-cn-0.22.zip）
 from __future__ import annotations
 
 import datetime
+import audioop
 import json
 import os
 import re
@@ -206,6 +207,7 @@ class VoskChineseRecognizer:
         audio_dir: Optional[str] = None,
         grammar: Optional[Sequence[str]] = None,
         log_file: Optional[str] = None,
+        min_rms: Optional[int] = None,
     ):
         self.language = language
         self.sample_rate = sample_rate
@@ -214,6 +216,13 @@ class VoskChineseRecognizer:
         self.audio_dir.mkdir(parents=True, exist_ok=True)
         self.log_file = Path(log_file or (PROJECT_ROOT / "voice_recognition_log.txt"))
         self.grammar = list(grammar) if grammar else None
+        # ===== 2026-09-30 静音误识别修正 START =====
+        # Vosk 在 grammar 约束下，安静环境/底噪/残留机器人播报也可能被硬匹配成某个词。
+        # 先用录音 RMS 能量做静音门限；低于门限则直接判定“未听到有效人声”，不送入 Vosk。
+        # 现场可按麦克风灵敏度调整：
+        #   export ROBO_MIN_RMS=300
+        self.min_rms = int(os.environ.get("ROBO_MIN_RMS", str(min_rms or 300)))
+        # ===== 2026-09-30 静音误识别修正 END =====
         self.model = None
         self.recognizer = None
         self._load_model()
@@ -233,6 +242,11 @@ class VoskChineseRecognizer:
             )
 
         self.model = vosk.Model(self.model_path)
+        self._reset_recognizer()
+
+    def _reset_recognizer(self):
+        """只重置 KaldiRecognizer，不重复加载大模型。"""
+        import vosk
         if self.grammar:
             self.recognizer = vosk.KaldiRecognizer(self.model, self.sample_rate, json.dumps(self.grammar, ensure_ascii=False))
         else:
@@ -241,7 +255,7 @@ class VoskChineseRecognizer:
     def reset_grammar(self, grammar: Optional[Sequence[str]] = None):
         """按不同环节切换词表，如注册姓名/开关控制/确认。"""
         self.grammar = list(grammar) if grammar else None
-        self._load_model()
+        self._reset_recognizer()
 
     def record_audio(self, duration: float = 5.0, filename: Optional[str] = None) -> str:
         if pyaudio is None:
@@ -274,6 +288,16 @@ class VoskChineseRecognizer:
             wf.writeframes(b"".join(frames))
         return filename
 
+    # ===== 2026-09-30 静音误识别修正 START =====
+    def _audio_rms(self, audio_file: str) -> int:
+        """计算 16-bit 单声道 WAV 的 RMS 能量，用于过滤静音/底噪误识别。"""
+        with wave.open(audio_file, "rb") as wf:
+            frames = wf.readframes(wf.getnframes())
+            if not frames:
+                return 0
+            return audioop.rms(frames, wf.getsampwidth())
+    # ===== 2026-09-30 静音误识别修正 END =====
+
     def recognize_file(self, audio_file: str) -> RecognitionResult:
         if self.recognizer is None:
             self._load_model()
@@ -297,7 +321,22 @@ class VoskChineseRecognizer:
         return result
 
     def listen_once(self, duration: float = 5.0) -> RecognitionResult:
+        print(f"[开始录音] 录音 {duration:.1f} 秒，请现在说话")
         audio_file = self.record_audio(duration=duration)
+        # ===== 2026-09-30 静音误识别修正 START =====
+        rms = self._audio_rms(audio_file)
+        print(f"[录音能量] RMS={rms}, 阈值={self.min_rms}")
+        if rms < self.min_rms:
+            result = RecognitionResult(
+                text="",
+                audio_file=audio_file,
+                raw={"reason": "low_rms", "rms": rms, "min_rms": self.min_rms},
+                success=False,
+            )
+            self._log(result)
+            print("[语音识别] 录音能量低于阈值，判定为无人声/静音，跳过 Vosk 识别")
+            return result
+        # ===== 2026-09-30 静音误识别修正 END =====
         return self.recognize_file(audio_file)
 
     def listen_with_retry(
@@ -454,9 +493,16 @@ class CompetitionVoiceService:
         speaker=None,
         model_path: Optional[str] = None,
         audio_dir: Optional[str] = None,
+        wait_after_tts: bool = True,
     ):
         self.owner_names = list(owner_names or DEFAULT_OWNER_NAMES)
         self.speaker = speaker
+        # ===== 2026-09-30 语音监听时序修正 START =====
+        # SummerTTSSpeaker.speak() 是非阻塞发布 topic，函数返回时机器人可能还在说话。
+        # 如果立刻开始录音，会把机器人自己的播报录进去，表现为“没等主人回答就往下跑”。
+        # 因此在需要听主人回答的提示语后，按文本长度估算等待时间，再开始录音。
+        self.wait_after_tts = wait_after_tts
+        # ===== 2026-09-30 语音监听时序修正 END =====
         self.parser = CompetitionVoiceParser(owner_names=self.owner_names)
         grammar = build_grammar_phrases(self.owner_names)
         self.recognizer = VoskChineseRecognizer(
@@ -466,29 +512,163 @@ class CompetitionVoiceService:
             grammar=grammar,
         )
 
-    def say(self, text: str):
+    def _estimate_tts_seconds(self, text: str) -> float:
+        """按中文播报长度估算等待时间，避免录到机器人自己的声音。"""
+        if not text:
+            return 0.0
+        # ===== 2026-09-30 语音监听时序修正 START =====
+        # 现场 summer_tts_node 是“生成 wav + play 播放”的异步链路，Python publish 返回时，
+        # TTS 可能还没开始播；因此等待必须比单纯文本时长更保守。
+        # 当前没有 TTS“播放完成”回传 topic，因此采用：
+        #   等待时长 = 固定启动/合成缓冲 + 中文字数 * 单字播报时长
+        # 可现场按语速调参：
+        #   export ROBO_TTS_SEC_PER_CHAR=0.45
+        #   export ROBO_TTS_WAIT_EXTRA=2.5
+        #   export ROBO_TTS_WAIT_SCALE=1.0
+        scale = float(os.environ.get("ROBO_TTS_WAIT_SCALE", "1.0"))
+        extra = float(os.environ.get("ROBO_TTS_WAIT_EXTRA", "2.5"))
+        sec_per_char = float(os.environ.get("ROBO_TTS_SEC_PER_CHAR", "0.45"))
+        return min(max((len(text) * sec_per_char + extra) * scale, 2.0), 30.0)
+        # ===== 2026-09-30 语音监听时序修正 END =====
+
+    def say(self, text: str, wait: bool = False):
+        # ===== 2026-09-30 TTS播放完成同步 START =====
+        # 优先使用新版 SummerTTSSpeaker.speak(wait_done=True)，等待 C++ 节点发布 /summer_tts_done。
+        # 如果现场还是旧版 TTS 节点/旧版 speaker，则回退到“按文本长度估算等待”。
+        published = False
         if self.speaker is not None:
-            self.speaker.speak(text)
+            if wait:
+                try:
+                    print(f"[TTS同步] 发送播报并等待完成：{text}")
+                    ok = self.speaker.speak(text, wait_done=True, timeout=30.0)
+                    published = True
+                    if ok:
+                        print("[TTS同步] 已收到 /summer_tts_done，下一步将开始录音/识别")
+                        return
+                    print("[TTS同步] 未收到 /summer_tts_done，回退到估算等待")
+                except TypeError:
+                    # 兼容旧版 SummerTTSSpeaker.speak(text)
+                    self.speaker.speak(text)
+                    published = True
+            else:
+                self.speaker.speak(text)
+                published = True
         else:
             print(f"[TTS] {text}")
+        # ===== 2026-09-30 TTS播放完成同步 END =====
+
+        # ===== 2026-09-30 语音监听时序修正 START =====
+        if wait and self.wait_after_tts:
+            wait_seconds = self._estimate_tts_seconds(text)
+            if not published:
+                print(f"[TTS等待] 无真实 speaker，仅控制台输出：{text}")
+            else:
+                print(f"[TTS等待] 已发送播报：{text}")
+            print(f"[TTS等待] 按 {len(text)} 字估算等待约 {wait_seconds:.1f} 秒，等待播报完成后再录音")
+            time.sleep(wait_seconds)
+            print("[TTS等待] 播报等待结束，下一步将开始录音/识别")
+        # ===== 2026-09-30 语音监听时序修正 END =====
+
+    def ask_raw_text(
+        self,
+        prompt: str,
+        duration: float = 5.0,
+        retries: int = 3,
+        repeat: bool = True,
+        repeat_template: str = "你说的是，{}",
+        retry_prompt: str = "没有听清，请再说一遍",
+        free_grammar: bool = True,
+    ) -> str:
+        """
+        固定话术播报 -> 等待 TTS 完成 -> 录音识别 -> 原文复述。
+
+        这是当前主流程推荐使用的“交互原话”接口：不切割词条、不匹配关键词，
+        只返回 Vosk 识别出的原始文本，并可按 repeat_template 复述。
+        free_grammar=True 时临时关闭 grammar，避免词条不完整时被强行匹配到固定词表。
+        """
+        last_text = ""
+        for attempt in range(1, retries + 1):
+            if rospy.is_shutdown():
+                return last_text
+
+            self.say(prompt, wait=True)
+
+            old_grammar = list(self.recognizer.grammar) if self.recognizer.grammar else None
+            if free_grammar:
+                self.recognizer.reset_grammar(None)
+            try:
+                result = self.recognizer.listen_once(duration=duration)
+            finally:
+                if free_grammar:
+                    self.recognizer.reset_grammar(old_grammar)
+
+            text = (result.text or "").strip()
+            last_text = text
+            print(f"[语音交互原文] 第 {attempt}/{retries} 次：{text}")
+            if text:
+                if repeat:
+                    self.say(repeat_template.format(text), wait=True)
+                return text
+
+            if attempt < retries:
+                self.say(retry_prompt, wait=True)
+
+        return last_text
+
+    # ===== 2026-09-30 赛规语音覆盖补充 START =====
+    # 以下 announce_* 方法不做识别，只负责把主流程/视觉/行为识别结果用统一话术播报。
+    # 这样居家生活赛项 jujia26.py 和具身服务/智能赛项 zhineng 主流程都可以复用本文件。
+    def announce_owner_registered(self, person_name: str, owner_index: Optional[int] = None):
+        """人脸注册后播报注册结果。"""
+        if owner_index is None:
+            self.say(f"{person_name}，注册完成", wait=True)
+        else:
+            self.say(f"主人{owner_index}，{person_name}，注册完成", wait=True)
+
+    def announce_owner_recognized(self, person_name: str, owner_index: Optional[int] = None):
+        """识别人脸后播报主人姓名。"""
+        if owner_index is None:
+            self.say(f"识别到主人，{person_name}", wait=True)
+        else:
+            self.say(f"识别到主人{owner_index}，{person_name}", wait=True)
+
+    def announce_behavior(self, behavior: str, person_name: Optional[str] = None):
+        """识别姿态/行为后播报行为名称。"""
+        prefix = f"{person_name}的行为是" if person_name else "识别到的行为是"
+        self.say(f"{prefix}{behavior}", wait=True)
+
+    def announce_trash_found(self, trash_name: str = "垃圾", location_desc: Optional[str] = None):
+        """居家生活：找到地面垃圾后播报。"""
+        if location_desc:
+            self.say(f"发现{location_desc}的{trash_name}", wait=True)
+        else:
+            self.say(f"发现{trash_name}", wait=True)
+
+    def announce_object_recognized(self, object_name: str, extra_desc: Optional[str] = None):
+        """具身服务/智能赛项：成功识别物品后播报。"""
+        if extra_desc:
+            self.say(f"识别到{extra_desc}，{object_name}", wait=True)
+        else:
+            self.say(f"识别到物品，{object_name}", wait=True)
+    # ===== 2026-09-30 赛规语音覆盖补充 END =====
 
     def ask_owner_name(self, retries: int = 3, duration: float = 4.0) -> Tuple[Optional[str], float, str]:
         """询问并识别主人姓名。返回：(姓名, 置信度, 原始文本)。"""
         for _ in range(retries):
-            self.say("你叫什么名字？")
+            self.say("你叫什么名字？", wait=True)
             result = self.recognizer.listen_once(duration=duration)
             name, score = self.parser.parse_owner_name(result.text)
             if name:
-                self.say(f"好的，{name}")
+                self.say(f"好的，{name}", wait=True)
                 return name, score, result.text
-            self.say("没有听清，请再说一遍")
+            self.say("没有听清，请再说一遍", wait=True)
         return None, 0.0, ""
 
     def ask_switch_command(self, person_name: str = "主人", retries: int = 3, duration: float = 5.0) -> SwitchCommand:
         """询问坐/躺主人需要操作哪个开关。"""
         last_cmd = SwitchCommand(raw_text="")
         for _ in range(retries):
-            self.say(f"{person_name}，请告诉我需要打开或关闭哪个开关")
+            self.say("请说开关需求", wait=True)
             result = self.recognizer.listen_once(duration=duration)
             cmd = self.parser.parse_switch_command(result.text)
             last_cmd = cmd
@@ -501,34 +681,75 @@ class CompetitionVoiceService:
                 if cmd.number:
                     desc.append(f"{cmd.number}号")
                 desc.append(cmd.target or "开关")
-                self.say("收到，你的需求是" + "".join(desc))
+                self.say("收到，你的需求是" + "".join(desc), wait=True)
                 return cmd
-            self.say("没有识别清楚开关需求，请再说一遍")
+            self.say("没有识别清楚开关需求，请再说一遍", wait=True)
         return last_cmd
+
+    # ===== 2026-09-30 赛规语音覆盖补充 START =====
+    def ask_switch_command_confirmed(
+        self,
+        person_name: str = "主人",
+        retries: int = 3,
+        duration: float = 6.0,
+        confirm_retries: int = 2,
+        confirm_duration: float = 3.0,
+    ) -> Tuple[SwitchCommand, Optional[bool]]:
+        """
+        坐/躺/休息主人开关需求：询问、解析并二次确认。
+
+        返回：
+            (SwitchCommand, confirmed)
+            confirmed=True：主人确认；
+            confirmed=False：主人否认；
+            confirmed=None：未听清确认。
+        """
+        cmd = self.ask_switch_command(person_name=person_name, retries=retries, duration=duration)
+        if not cmd.is_valid:
+            return cmd, False
+
+        desc = []
+        if cmd.action:
+            desc.append(cmd.action)
+        if cmd.color:
+            desc.append(cmd.color)
+        if cmd.number:
+            desc.append(f"{cmd.number}号")
+        desc.append(cmd.target or "开关")
+        prompt = "确认" + "".join(desc) + "吗？请回答是或不是"
+        confirmed = self.ask_confirm(prompt, retries=confirm_retries, duration=confirm_duration)
+        if confirmed is True:
+            self.say("好的，我将执行这个开关需求", wait=True)
+        elif confirmed is False:
+            self.say("好的，请重新说明开关需求", wait=True)
+        else:
+            self.say("没有听清确认结果，暂不执行开关操作", wait=True)
+        return cmd, confirmed
+    # ===== 2026-09-30 赛规语音覆盖补充 END =====
 
     def ask_help_request(self, person_name: str = "主人", retries: int = 3, duration: float = 6.0) -> HelpRequest:
         """询问挥手主人需求。赛规要求中文语音交互，默认识别后复述。"""
         last = HelpRequest(raw_text="", request_text="", confidence=0.0)
         for _ in range(retries):
-            self.say(f"{person_name}，请告诉我你需要什么帮助")
+            self.say("请说需要什么帮助", wait=True)
             result = self.recognizer.listen_once(duration=duration)
             req = self.parser.parse_help_request(result.text)
             last = req
             if req.request_text:
-                self.say(f"你的需求是，{req.request_text}")
+                self.say(f"你的需求是，{req.request_text}", wait=True)
                 return req
-            self.say("没有听清，请再说一遍")
+            self.say("没有听清，请再说一遍", wait=True)
         return last
 
     def ask_confirm(self, prompt: str, retries: int = 2, duration: float = 3.0) -> Optional[bool]:
         """确认/否认问答。"""
         for _ in range(retries):
-            self.say(prompt)
+            self.say(prompt, wait=True)
             result = self.recognizer.listen_once(duration=duration)
             yn = self.parser.parse_yes_no(result.text)
             if yn is not None:
                 return yn
-            self.say("请回答是或不是")
+            self.say("请回答是或不是", wait=True)
         return None
 
 
