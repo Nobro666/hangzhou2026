@@ -24,8 +24,8 @@
 
 
 
-from  summer_tts_speaker import SummerTTSSpeaker
-from get_keyword import FuzzyKeywordMatcher #模糊匹配，北京用的发音匹配
+from summer_tts_speaker import SummerTTSSpeaker
+from speech_2026 import CompetitionVoiceService
 from face_to_person import facetoPerson
 from goal_calculator import calculate_facing_goal
 import sys
@@ -35,8 +35,6 @@ import os
 import cv2
 from navigator import Navigator  # 导航模块
 from pathlib import Path
-from vosk_speech_recognition import record_and_recognize,get_recognizer_instance 
-#因模型较大 get_recognizer_instance ·提前加载模型
 from base_controller import Base  # 底盘运动模块
 from std_msgs.msg import String  # std_msgs中包含消息类型string，发布的消息类型为String，从String.data中可获得信息，
 import datetime
@@ -81,6 +79,13 @@ ACTION_FALL = "摔倒"
 ACTION_WAVE = "挥手"
 ACTION_UNKNOWN = "未知行为"
 
+# 房间内分段旋转搜索参数：检测 6 个方向，每次左转 60°，完成一整圈。
+ROOM_SCAN_VIEW_COUNT = 6
+ROOM_SCAN_STEP_DEGREES = 60.0
+ROOM_SCAN_DETECT_TIMEOUT = 2.0
+ROOM_SCAN_TURN_TIMEOUT = 8.0
+ROOM_SCAN_SETTLE_SECONDS = 0.5
+
 
 class Controller:
     def __init__(self, name):
@@ -107,9 +112,10 @@ class Controller:
         print("==============视觉初始化完成==============")
 
         self.speak = SummerTTSSpeaker()
-        get_recognizer_instance('zh') # 这会触发模型加载 后续调用recognize函数时不会重复加载
-        self.name_matcher = FuzzyKeywordMatcher(keywords=target_name)
-        # self.matcher = FuzzyKeywordMatcher(keywords=target_keywords)  
+        self.voice = CompetitionVoiceService(
+            owner_names=target_name,
+            speaker=self.speak,
+        )
         print("==============语音初始化完成==============")
 
         # 保存人脸 ID、主人编号和姓名
@@ -213,33 +219,30 @@ class Controller:
 
 
 
-    def register(self,id):
+    def register(self, id):
+        """注册一位主人，并绑定人脸 ID、主人编号和姓名。"""
         owner_index = id
         person_id = None
-        person_name = None
         max_attempts = 3
         face_attempts = 0
-        speech_attempts = 0
-        self.speak.speak(f"请主人{owner_index}站在我面前，保持静止")
-        time.sleep(1)
+
+        self.voice.say(
+            f"请主人{owner_index}站在我面前，保持静止",
+            wait=True,
+        )
 
         while (person_id is None and
                face_attempts < max_attempts and
                not rospy.is_shutdown()):
             face_attempts += 1
-            self.speak.speak("开始人脸注册，请看向我")
-            time.sleep(0.5)
+            self.voice.say("开始人脸注册，请看向我", wait=True)
             print(f">>> 正在进行人脸注册...（第{face_attempts}/{max_attempts}次）")
             try:
-                # ===== 2026-10-01 修改：注册侧脸前播报左转、右转提示 START =====
                 person_id = self.face.register_new_face(
-                    prompt_callback=lambda prompt: self.speak.speak(
-                        prompt,
-                        wait_done=True,
-                        timeout=30.0,
+                    prompt_callback=lambda prompt: self.voice.say(
+                        prompt, wait=True
                     )
                 )
-                # ===== 2026-10-01 修改：注册侧脸前播报左转、右转提示 END =====
             except Exception as error:
                 print(f"人脸注册发生异常: {error}")
                 person_id = None
@@ -254,20 +257,18 @@ class Controller:
             if person_id is None:
                 print("未检测到有效人脸")
                 if face_attempts < max_attempts:
-                    self.speak.speak("注册失败，请再试一次")
-                    time.sleep(1)
+                    self.voice.say("注册失败，请再试一次", wait=True)
 
         if person_id is None:
             if rospy.is_shutdown():
                 print("ROS 已关闭，人脸注册终止")
             else:
                 print(f"人脸检测已达到最大尝试次数（{max_attempts}次）")
-                self.speak.speak("人脸注册失败")
+                self.voice.say("人脸注册失败", wait=True)
             return None
 
         print(f"人脸注册成功，ID: {person_id}")
-        self.speak.speak("人脸注册成功")
-        time.sleep(0.5)
+        self.voice.say("人脸注册成功", wait=True)
 
         # --------------------------------------------------------------
         # 阶段 2：询问并识别主人姓名
@@ -275,51 +276,23 @@ class Controller:
 
         print(">>> [阶段2] 正在采集姓名...")
 
-        while (person_name is None and
-               speech_attempts < max_attempts and
-               not rospy.is_shutdown()):
-            speech_attempts += 1
-            self.speak.speak("你叫什么名字？")
-            time.sleep(0.5)
-
-            print(f">>> 正在进行姓名语音识别...（第{speech_attempts}/{max_attempts}次）")
-            text0 = None
-            audio_file = None
-            try:
-                text0, audio_file = record_and_recognize('zh',duration=5)
-                print(f"录音文件: {audio_file}")
-                print(f"姓名识别结果: {text0}")
-            except Exception as error:
-                print(f"姓名语音识别发生异常: {error}")
-            matched_name = None
-            try:
-                if text0 is not None:
-                    matched_name, score = (self.name_matcher.find_best_match(text0, min_confidence=0.80))
-                    print(f"姓名匹配成功: '{matched_name}', "f"相似度: {score:.2%}")
-            except Exception as error:
-                print(f"姓名匹配失败: {error}")
-                matched_name = None
-            # try:
-            #     matched_name = extract_keywords_by_phonetics(text0, target_name, min_similarity=0.80)
-            #     print(f"匹配成功: '{matched_name}'\n")
-            # except:
-            #     pass
-            #     time.sleep(0.5)
-
-            if (matched_name is not None and matched_name in target_name):
-                person_name = matched_name
-                self.speak.speak(f"好的，{person_name}")
-                break
-            if speech_attempts < max_attempts:
-                self.speak.speak("没有听清，请再说一遍")
-                time.sleep(1)
+        try:
+            person_name, name_score, raw_name = self.voice.ask_owner_name(
+                retries=max_attempts,
+                duration=5.0,
+            )
+            print(f"姓名识别原文: {raw_name}")
+            print(f"姓名匹配结果: {person_name}，置信度: {name_score:.2%}")
+        except Exception as error:
+            print(f"姓名语音识别发生异常: {error}")
+            person_name = None
 
         if person_name is None:
             if rospy.is_shutdown():
                 print("ROS 已关闭，姓名采集终止")
             else:
                 print(f"语音识别已达到最大尝试次数（{max_attempts}次）")
-                self.speak.speak("姓名识别失败")
+                self.voice.say("姓名识别失败", wait=True)
             return None
 
         # --------------------------------------------------------------
@@ -340,8 +313,7 @@ class Controller:
         print(f"人脸 ID: {person_id}")
         print(f"主人姓名: {person_name}")
         print("--------------------------------")
-        self.speak.speak(f"{person_name} 注册完成")
-        time.sleep(1)
+        self.voice.announce_owner_registered(person_name, owner_index)
         return register_result
     
 
@@ -359,7 +331,7 @@ class Controller:
         6. 保存识别结果。
         """
 
-        self.speak.speak("开始巡游房间")
+        self.voice.say("开始巡游房间", wait=True)
         room_results = []
 
         for room_index in range(4):
@@ -368,8 +340,9 @@ class Controller:
             print("--------------------------------")
             print(f">>> 正在巡游房间：{room_name}")
             print("--------------------------------")
-            self.navigator.goto(room_name)
-            time.sleep(1)
+            if not self.navigator.goto(room_name):
+                print(f"无法到达{room_name}，跳过该房间")
+                continue
 
             # 使用 detect_people.py
             person_result = self.find_owner_in_room(room_name)
@@ -388,7 +361,7 @@ class Controller:
             owner_result = self.recognize_owner()
             if owner_result is None:
                 print(f"{room_name}中的人物不是已注册主人")
-                self.speak.speak("没有识别出主人")
+                self.voice.say("没有识别出主人", wait=True)
                 continue
 
             face_id = owner_result["face_id"]
@@ -400,7 +373,10 @@ class Controller:
                 print(f"{person_name}已经完成识别，跳过")
                 continue
 
-            self.speak.speak(f"识别到主人{owner_index}，{person_name}")
+            self.voice.announce_owner_recognized(
+                person_name,
+                owner_index,
+            )
 
             # ===== 2026-09-20 修改：统一调用行为识别接口 =====
             behavior = self.recognize_behavior(face_id, person_name)
@@ -414,7 +390,7 @@ class Controller:
             print(f"行为：{behavior}")
             print("--------------------------------")
 
-            self.speak.speak(f"{person_name}的行为是{behavior}")
+            self.voice.announce_behavior(behavior, person_name)
 
             observation = {
                 "room_name": room_name,
@@ -452,11 +428,12 @@ class Controller:
 
     def find_owner_in_room(self, room_name):
         """
-        在当前房间中检测人物。
+        在当前房间分段旋转一整圈并检测人物。
 
         使用：
         - KinectCamera
         - PersonDetector.detect_person()
+        - Base.turn()
 
         返回：
         {
@@ -470,7 +447,37 @@ class Controller:
         camera_coords = None
         try:
             self.camera.open_camera()
-            has_person, camera_coords = (self.people_detector.detect_person(self.camera,max_distance=5.0))
+
+            for view_index in range(ROOM_SCAN_VIEW_COUNT):
+                if rospy.is_shutdown():
+                    break
+
+                current_angle = view_index * ROOM_SCAN_STEP_DEGREES
+                print(
+                    f"{room_name}人物扫描方向 "
+                    f"{view_index + 1}/{ROOM_SCAN_VIEW_COUNT}，"
+                    f"相对起始方向约 {current_angle:.0f}°"
+                )
+                has_person, camera_coords = (
+                    self.people_detector.detect_person(
+                        self.camera,
+                        max_distance=5.0,
+                        timeout=ROOM_SCAN_DETECT_TIMEOUT,
+                    )
+                )
+                if has_person:
+                    break
+
+                # 每个方向未检测到人物后左转一段。最后一次也转动，
+                # 使完整扫描结束时总转角为 360°，恢复到起始方向。
+                turn_success = self.base.turn(
+                    ROOM_SCAN_STEP_DEGREES,
+                    timeout=ROOM_SCAN_TURN_TIMEOUT,
+                )
+                if not turn_success:
+                    print(f"{room_name}底盘转向失败，终止该房间扫描")
+                    break
+                rospy.sleep(ROOM_SCAN_SETTLE_SECONDS)
         except Exception as error:
             print(f"{room_name}人物检测发生异常：{error}")
 
@@ -510,8 +517,7 @@ class Controller:
 
         self.location["current_person"] = person_goal
         try:
-            self.navigator.goto("current_person")
-            return True
+            return self.navigator.goto("current_person")
         except Exception as error:
             print(f"导航到人物附近失败：{error}")
             return False
@@ -580,34 +586,26 @@ class Controller:
             return self.handle_wave_behavior(person_name)
 
         print(f"{person_name}的行为尚未识别，暂不执行交互动作")
-        self.speak.speak("暂时没有识别出你的行为")
+        self.voice.say("暂时没有识别出你的行为", wait=True)
         return False
 
     def handle_switch_behavior(self, person_name):
         """主人坐下或躺下：询问需求、识别开关标记、执行机械臂动作。"""
 
         # 1. 询问并识别开关需求
-        switch_command = None
+        if rospy.is_shutdown():
+            return False
 
-        for _ in range(3):
-            if rospy.is_shutdown():
-                return False
+        switch_command = self.voice.ask_raw_text(
+            prompt=f"{person_name}，请告诉我需要操作哪个开关",
+            duration=5.0,
+            retries=3,
+            repeat=True,
+            repeat_template="你的需求是，{}",
+            free_grammar=True,
+        ).strip()
 
-            self.speak.speak(f"{person_name}，请告诉我需要操作哪个开关")
-            text0, audio_file = record_and_recognize('zh', duration=5)
-
-            print(f"录音文件：{audio_file}")
-            print(f"开关需求识别结果：{text0}")
-
-            if text0 is not None and text0.strip():
-                # TODO 未实现：从语音中提取开关编号、颜色和操作类型。
-                # 当前仅保存原始识别文本，后续在这里补充解析逻辑。
-                switch_command = text0.strip()
-                break
-
-            self.speak.speak("没有听清，请再说一遍")
-
-        if switch_command is None:
+        if not switch_command:
             print("未获取到开关需求")
             return False
 
@@ -631,7 +629,7 @@ class Controller:
     def handle_fall_behavior(self, person_name):
         """主人摔倒：定位人体、执行机械臂动作。"""
 
-        self.speak.speak(f"{person_name}，我来帮助你")
+        self.voice.say(f"{person_name}，我来帮助你", wait=True)
 
         # 1. 获取摔倒主人的身体位置
         body_position = None
@@ -651,25 +649,24 @@ class Controller:
     def handle_wave_behavior(self, person_name):
         """主人挥手：询问需求、识别中文语音并复述。"""
 
-        for _ in range(3):
-            if rospy.is_shutdown():
-                return False
+        if rospy.is_shutdown():
+            return False
 
-            self.speak.speak(f"{person_name}，请告诉我你的需求")
-            text0, audio_file = record_and_recognize('zh', duration=5)
+        request_text = self.voice.ask_raw_text(
+            prompt=f"{person_name}，请告诉我你的需求",
+            duration=5.0,
+            retries=3,
+            repeat=True,
+            repeat_template="你的需求是，{}",
+            free_grammar=True,
+        ).strip()
 
-            print(f"录音文件：{audio_file}")
-            print(f"需求识别结果：{text0}")
+        if not request_text:
+            print("连续三次未识别到主人需求")
+            return False
 
-            if text0 is not None and text0.strip():
-                request_text = text0.strip()
-                self.speak.speak(f"你的需求是，{request_text}")
-                return True
-
-            self.speak.speak("没有听清，请再说一遍")
-
-        print("连续三次未识别到主人需求")
-        return False
+        print(f"主人需求原文：{request_text}")
+        return True
 
 
 
@@ -679,7 +676,7 @@ class Controller:
         self.kinova.close_finger()
         self.navigator.goto("chu")
         self.navigator.goto("start")
-        self.speak.speak("已到达入场点")
+        self.voice.say("已到达入场点", wait=True)
         time.sleep(1)
 
 
@@ -700,11 +697,9 @@ class Controller:
         print(f"成功注册人数: {len(register_results)}")
         print(f"主人信息表: {self.person_info}")
 
-                
+
 
         """---巡游四个房间---"""
-        self.speak.speak("开始巡游房间")
-        time.sleep(1)
         # self.navigator.goto("room0")
         # self.navigator.goto("room1")
         # self.navigator.goto("room2")
@@ -729,8 +724,9 @@ class Controller:
 
 
         """---自主离场---"""
-        self.speak.speak("开始自主离场")
-        self.navigator.goto("over")
+        self.voice.say("开始自主离场", wait=True)
+        if not self.navigator.goto("over"):
+            print("自主离场导航失败")
 
 
 if __name__ == '__main__':

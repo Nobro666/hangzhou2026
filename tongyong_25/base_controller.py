@@ -22,6 +22,7 @@ class Base:
         self.position = []  # 坐标
         self.orientation = []  # 四元数
         self.angle = 0  # 角度
+        self.pose_received = False
         rospy.sleep(1)  # 等待获取现在位置的回调函数开始工作
 
     def now_pose(self, pose):
@@ -36,6 +37,7 @@ class Base:
         self.position = [self.px, self.py, self.pz]
         self.orientation = [self.ox, self.oy, self.oz, self.ow]
         self.get_angle()
+        self.pose_received = True
 
     def get_pose(self):
         """可调用获取现在的坐标和四元数"""
@@ -48,36 +50,80 @@ class Base:
         self.angle = eular
         return eular
 
-    def turn(self, angle, kp=1.5, kd=0.5):
-        """传入转的角度,单位°,正值左转,负值右转,范围0~180°"""
-        print('turing')
-        angle_radian = (float(angle) / 180) * math.pi
+    @staticmethod
+    def normalize_angle(angle):
+        """将弧度角归一化到 [-pi, pi)。"""
+        return (angle + math.pi) % (2 * math.pi) - math.pi
+
+    def turn(self, angle, kp=1.5, kd=0.05, timeout=10.0,
+             max_speed=0.6, min_speed=0.10):
+        """
+        原地转动指定角度。
+
+        参数 angle 的单位为度，正值左转、负值右转，范围为 [-180, 180]。
+        返回 True 表示到达目标角度，False 表示位姿不可用、超时或 ROS 关闭。
+        """
+        angle = float(angle)
+        if angle < -180.0 or angle > 180.0:
+            raise ValueError("turn angle must be in [-180, 180] degrees")
+
+        if not self.pose_received:
+            try:
+                pose = rospy.wait_for_message('/robot_pose', Pose, timeout=2.0)
+                self.now_pose(pose)
+            except rospy.ROSException:
+                rospy.logwarn("底盘转向失败：未收到 /robot_pose")
+                self.stop()
+                return False
+
+        angle_radian = math.radians(angle)
+        if abs(angle_radian) <= 0.02:
+            self.stop()
+            return True
+
         start_angle = self.get_angle()
-        end_angle = start_angle + angle_radian
-        if end_angle > math.pi:
-            end_angle = end_angle - 2 * math.pi
-        elif end_angle < -math.pi:
-            end_angle = end_angle + 2 * math.pi
-        error = angle_radian
-        rate = rospy.Rate(1000)
-        print(angle_radian)
-        print(self.angle)
-        print(start_angle)
-        print(end_angle)
-        print(self.angle - end_angle)
-        while abs(self.angle - end_angle) > 0.02:
-            last_error = error
-            error = abs(self.angle - end_angle)
-            if error > math.pi:
-                error = 2 * math.pi - error
-            if angle >= 0:
-                speed = kp * (error + 0.01)
-            else:
-                speed = -kp * (error + 0.01)
-            print('{},{}'.format(error, speed))
-            self.rotate(speed)
-            rate.sleep()
-        self.stop()
+        end_angle = self.normalize_angle(start_angle + angle_radian)
+        start_time = rospy.get_time()
+        last_time = start_time
+        last_error = self.normalize_angle(end_angle - start_angle)
+        rate = rospy.Rate(30)
+
+        print(
+            "开始底盘转向：目标={:.1f}°，起始角={:.3f} rad，"
+            "目标角={:.3f} rad".format(angle, start_angle, end_angle)
+        )
+
+        try:
+            while not rospy.is_shutdown():
+                now = rospy.get_time()
+                error = self.normalize_angle(end_angle - self.get_angle())
+
+                if abs(error) <= 0.02:
+                    print("底盘转向完成")
+                    return True
+
+                if now - start_time >= timeout:
+                    rospy.logwarn(
+                        "底盘转向超时：剩余误差 %.3f rad", error
+                    )
+                    return False
+
+                dt = max(now - last_time, 1e-3)
+                derivative = (error - last_error) / dt
+                speed = kp * error + kd * derivative
+
+                if abs(speed) < min_speed:
+                    speed = math.copysign(min_speed, error)
+                speed = max(-max_speed, min(max_speed, speed))
+
+                self.rotate(speed)
+                last_error = error
+                last_time = now
+                rate.sleep()
+        finally:
+            self.stop()
+
+        return False
 
     def rotate(self, speed):
         """旋转"""

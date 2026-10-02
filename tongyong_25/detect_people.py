@@ -4,6 +4,7 @@ import torch
 import time
 from ultralytics import YOLO
 from abc import ABC, abstractmethod
+from pathlib import Path
 
 class YoloResult:
     def __init__(self, name, x, y, conf) -> None:
@@ -63,6 +64,13 @@ class KinectCamera(Camera):
     def get_depth(self):
         capture = self.device.update()
         return capture.get_transformed_depth_image()
+
+    def get_rgbd(self):
+        """从同一个 Capture 获取彩色图和对齐后的深度图。"""
+        capture = self.device.update()
+        ret, color_image = capture.get_color_image()
+        retd, depth_image = capture.get_transformed_depth_image()
+        return ret, color_image, retd, depth_image
     
     def get_calibration(self):
         return self.K_kinect
@@ -79,10 +87,33 @@ class KinectCamera(Camera):
             device.close()
 
 class PersonDetector:
-    def __init__(self, model_path='./model/yolo11m.pt'):
-        self.model = YOLO(model_path)
+    def __init__(self, model_path=None):
+        project_dir = Path(__file__).resolve().parent
+        if model_path is None:
+            candidates = [
+                project_dir / 'model' / 'yolo11m.pt',
+                project_dir / 'catch_ground' / 'src' / 'model' / 'yolo11m.pt',
+            ]
+            model_file = next(
+                (path for path in candidates if path.is_file()),
+                candidates[0],
+            )
+        else:
+            model_file = Path(model_path).expanduser()
+            if not model_file.is_absolute():
+                model_file = project_dir / model_file
+
+        if not model_file.is_file():
+            raise FileNotFoundError(
+                f'未找到人物检测模型：{model_file}。'
+                '请将 yolo11m.pt 放入项目 model 目录。'
+            )
+
+        self.model_path = str(model_file)
+        self.model = YOLO(self.model_path)
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
         self.model.to(self.device)
+        print(f'人物检测模型：{self.model_path}')
 
     def get_target_distance(self, depth_image, x, y):
         if depth_image is None:
@@ -95,28 +126,26 @@ class PersonDetector:
         except:
             return None
 
-    def detect_person(self, camera, max_distance):
+    def detect_person(self, camera, max_distance, timeout=5.0):
         """
         检测指定距离内是否有人，并返回人的三维坐标
         参数:
             camera: 相机对象
             max_distance: 最大检测距离(米)
+            timeout: 单个方向的最长检测时间(秒)
         返回:
             (has_person, 3d_coords)
             has_person: 布尔值，表示是否检测到指定距离内的人
             3d_coords: 三维坐标元组(x, y, z)，若未检测到则为(0, 0, 0)
         """
         start_time = time.time()
-        timeout = 5  # 超时时间(秒)
-        
         while time.time() - start_time < timeout:
-            ret, color_frame = camera.get_frame()
-            retd, depth_image = camera.get_depth()
+            ret, color_frame, retd, depth_image = camera.get_rgbd()
             
             if not ret or not retd:
                 continue
 
-            results = self.model(color_frame)
+            results = self.model(color_frame, verbose=False)
             K = camera.get_calibration()
             height, width = color_frame.shape[:2]
 
