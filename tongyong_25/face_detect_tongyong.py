@@ -24,8 +24,12 @@ main函数调用方法:
 """
 2026.9.30修改
 添加左侧、右侧照片采集，提高识别稳定性
+
 注册前检查是否已经注册，避免同一个人产生多个 ID
+
 添加语音提示回调，注册侧脸前播报“请向左转一点”“请向右转一点”
+
+阈值0.65—>0.5，降低误识别率
 
 """
 
@@ -578,13 +582,13 @@ class Detector:
             
 
             # 检查匹配结果
-            if best_match is not None and best_distance < 0.65:
+            if best_match is not None and best_distance < 0.5:
                 print(f"检测到主人：{best_match}，距离{best_distance}")
                 self.detect_result = best_match     # 将检测结果保存在 detect_result 里
                 result[0] = items[1]
             else:
                 result[1] = items[1]
-                print(f"best_distance:{best_distance}， 最短距离大于0.6，不是已知人脸")
+                print(f"best_distance:{best_distance}， 最短距离大于0.5，不是已知人脸")
                 # break
                 # 保存已识别人脸的图片
                 # img = cv2.imread(img_path)
