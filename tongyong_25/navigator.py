@@ -6,6 +6,7 @@ import rospy
 from std_srvs.srv import Empty
 import actionlib
 from move_base_msgs.msg import MoveBaseAction, MoveBaseGoal
+from actionlib_msgs.msg import GoalStatus
 from soundplayer import Soundplayer
 from base_controller import Base
 
@@ -27,12 +28,25 @@ class Navigator:
 
     def add(self,location,num):
         self.location[str(num)]=location
-    def goto(self, place):
-        """调用传入地点可直接导航"""
+    def goto(self, place, server_timeout=10.0, goal_timeout=120.0,
+             max_attempts=3):
+        """调用传入地点导航，成功返回 True，失败返回 False。"""
+        if place not in self.location:
+            rospy.logerr("未知导航点：%s", place)
+            return False
         point = self.set_goal("map", self.location[place][0], self.location[place][1])  # 设置导航点
-        self.go_to_location(point)
-        print('I have got the ' + place)
+        success = self.go_to_location(
+            point,
+            server_timeout=server_timeout,
+            goal_timeout=goal_timeout,
+            max_attempts=max_attempts,
+        )
+        if success:
+            print('I have got the ' + place)
+        else:
+            rospy.logwarn("未能到达导航点：%s", place)
         # self.soundplayer.say('I have got the ' + place)
+        return success
 
     def go_near(self, name, position):
         """配合深度相机获取坐标可靠近物体"""
@@ -61,27 +75,54 @@ class Navigator:
         print('Goal set.')
         return self.goal
 
-    def go_to_location(self, location):
-        """导航实现"""
+    def go_to_location(self, location, server_timeout=10.0,
+                       goal_timeout=120.0, max_attempts=3):
+        """有限次数执行导航，避免 move_base 异常时无限等待。"""
         self.client = actionlib.SimpleActionClient('move_base', MoveBaseAction)  # 等待MoveBaseAction server启动
-        self.client.wait_for_server()
+        if not self.client.wait_for_server(rospy.Duration(server_timeout)):
+            rospy.logerr(
+                "等待 move_base action server 超时（%.1f 秒）",
+                server_timeout,
+            )
+            return False
         print('Ready to go.')
-        while not rospy.is_shutdown():
-            flag = False
-            while not flag:  # 导航到指定点
-                print('尝试导航...')
-                self.clear_costmap_client()
-                self.client.send_goal(location)
-                self.client.wait_for_result()
-                if self.client.get_state() == 3:
-                    flag = True
-                    break
-                # 第二种写法:
-                # if self.client.send_goal_and_wait(location) == 3:
-                #     flag = True
-                #     break
 
-            break
+        for attempt in range(1, max_attempts + 1):
+            if rospy.is_shutdown():
+                return False
+
+            print('尝试导航...（第{}/{}次）'.format(attempt, max_attempts))
+            try:
+                rospy.wait_for_service(
+                    'move_base/clear_costmaps',
+                    timeout=3.0,
+                )
+                self.clear_costmap_client()
+            except (rospy.ROSException, rospy.ServiceException) as error:
+                rospy.logwarn("清理代价地图失败：%s", error)
+
+            self.client.send_goal(location)
+            finished = self.client.wait_for_result(
+                rospy.Duration(goal_timeout)
+            )
+            if not finished:
+                rospy.logwarn(
+                    "导航等待超时（%.1f 秒），取消当前目标",
+                    goal_timeout,
+                )
+                self.client.cancel_goal()
+                continue
+
+            state = self.client.get_state()
+            if state == GoalStatus.SUCCEEDED:
+                return True
+
+            rospy.logwarn(
+                "导航失败，状态码=%s，将按剩余次数重试", state
+            )
+
+        self.client.cancel_all_goals()
+        return False
 
     def stop(self):
         self.client.cancel_all_goals()
