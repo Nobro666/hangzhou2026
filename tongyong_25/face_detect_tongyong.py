@@ -31,6 +31,8 @@ main函数调用方法:
 
 阈值0.65—>0.5，降低误识别率
 
+重复注册同一个人脸时，覆盖原有照片
+
 """
 
 class Detector:
@@ -484,26 +486,38 @@ class Detector:
         if face is None:
             return None
 
-        # 创建新 ID 前先检查是否已经注册，避免重复建立人脸目录。
+        # 创建新 ID 前先检查是否已经注册。
+        # 已注册的人脸复用原 ID，并用本次采集结果覆盖原照片。
         existing_person_id, best_distance = self._find_registered_face(face)
         if existing_person_id is not None:
-            self.detect_result = existing_person_id
             print(
                 f"该人脸已经注册，已有ID: {existing_person_id}，"
                 f"距离: {best_distance}"
             )
-            return None
+            new_person_id = existing_person_id
+            new_folder_path = os.path.join(
+                self.photopath,
+                str(new_person_id)
+            )
+            if os.path.exists(new_folder_path):
+                shutil.rmtree(new_folder_path)
+            os.makedirs(new_folder_path)
+            self.known_faces.pop(new_person_id, None)
+            print(f"正在覆盖人脸ID {new_person_id} 的原有照片")
+        else:
+            max_id = 0
+            for folder_name in os.listdir(self.photopath):
+                if folder_name.isdigit() and int(folder_name) > max_id:
+                    max_id = int(folder_name)
+            self.face_id_counter = max_id + 1
+            new_person_id = self.face_id_counter
+            new_folder_path = os.path.join(
+                self.photopath,
+                str(new_person_id)
+            )
+            os.makedirs(new_folder_path, exist_ok=True)
 
-        max_id = 0
-        for folder_name in os.listdir(self.photopath):
-            if folder_name.isdigit() and int(folder_name) > max_id:
-                max_id = int(folder_name)
-        self.face_id_counter = max_id + 1
-        new_person_id = self.face_id_counter
-
-        new_folder_path = os.path.join(self.photopath, str(new_person_id))
         self.face_folders[new_person_id] = new_folder_path
-        os.makedirs(new_folder_path, exist_ok=True)
 
         # --------------------------------------------------------------
         # 人脸注册采集方案：两种方案只能启用一种。

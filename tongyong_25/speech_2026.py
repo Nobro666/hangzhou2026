@@ -46,6 +46,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
+import rospy
+
 try:
     import pyaudio
 except Exception:  # pragma: no cover - 机器人现场环境才会有麦克风依赖
