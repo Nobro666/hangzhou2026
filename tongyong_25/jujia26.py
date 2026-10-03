@@ -32,6 +32,7 @@ import sys
 sys.path.append(r"/home/zq/catkin_ws/src/cmoon/src")
 import rospy
 import os
+import re
 import cv2
 from navigator import Navigator  # 导航模块
 from pathlib import Path
@@ -70,7 +71,7 @@ LOCATION = {
 target_keywords = ["开","关"]
 
 # 主人名字
-target_name = ["张三","李四","赵二"]
+target_name = ["张三","李四","王五"]
 
 # ===== 2026-09-20 修改：统一定义行为识别结果，便于后续分发动作 =====
 ACTION_SIT = "坐下"
@@ -134,6 +135,53 @@ class Controller:
         result = subprocess.run(command, shell=True, capture_output=True, text=True)
         output = result.stdout.strip()
         return output
+
+    def resolve_owner_name_from_target(self, raw_text):
+        """
+        将姓名识别原文约束到 target_name。
+
+        如果识别文本包含已有姓名，返回 target_name 中的标准写法；
+        如果没有匹配，则将清理后的识别文本作为现场新增姓名，
+        同步加入 target_name 和语音服务的姓名列表。
+        """
+        raw = (raw_text or "").strip()
+        if not raw:
+            return "", False
+
+        cleaned = re.sub(r"[^\w\u4e00-\u9fff]", "", raw)
+        for prefix in (
+            "我叫",
+            "我的名字叫",
+            "名字叫",
+            "姓名是",
+            "我是",
+            "叫",
+        ):
+            if cleaned.startswith(prefix):
+                cleaned = cleaned[len(prefix):]
+                break
+
+        cleaned = cleaned.strip()
+        if not cleaned:
+            cleaned = raw
+
+        for name in target_name:
+            if name and (name in cleaned or cleaned in name):
+                return name, False
+
+        target_name.append(cleaned)
+
+        if cleaned not in self.voice.owner_names:
+            self.voice.owner_names.append(cleaned)
+        if (hasattr(self.voice, "parser") and
+                cleaned not in self.voice.parser.owner_names):
+            self.voice.parser.owner_names.append(cleaned)
+
+        print(
+            f"新增主人姓名到 target_name：{cleaned}；"
+            f"当前 target_name={target_name}"
+        )
+        return cleaned, True
     
    
     def grip_object_coor(self,list):
@@ -274,20 +322,39 @@ class Controller:
         # 阶段 2：询问并识别主人姓名
         # --------------------------------------------------------------
 
-        print(">>> [阶段2] 正在采集姓名...")
-
+        # ===== 2026-10-01 姓名注册逻辑修正 START =====
+        print(
+            ">>> [阶段2] 正在采集姓名..."
+            "（先与 target_name 匹配；不在列表则新增）"
+        )
+        person_name = None
+        name_added = False
         try:
-            person_name, name_score, raw_name = self.voice.ask_owner_name(
+            raw_name = self.voice.ask_raw_text(
+                prompt="你叫什么名字？",
+                duration=5,
                 retries=max_attempts,
-                duration=5.0,
-            )
+                repeat=False,
+                free_grammar=True,
+            ).strip()
             print(f"姓名识别原文: {raw_name}")
-            print(f"姓名匹配结果: {person_name}，置信度: {name_score:.2%}")
+            person_name, name_added = (
+                self.resolve_owner_name_from_target(raw_name)
+            )
         except Exception as error:
             print(f"姓名语音识别发生异常: {error}")
-            person_name = None
 
-        if person_name is None:
+        if person_name:
+            if name_added:
+                self.voice.say(
+                    f"好的，新增主人姓名，{person_name}",
+                    wait=True,
+                )
+            else:
+                self.voice.say(f"好的，{person_name}", wait=True)
+        # ===== 2026-10-01 姓名注册逻辑修正 END =====
+
+        if not person_name:
             if rospy.is_shutdown():
                 print("ROS 已关闭，姓名采集终止")
             else:
