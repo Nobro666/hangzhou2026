@@ -31,6 +31,8 @@ main函数调用方法:
 
 阈值0.65—>0.5，降低误识别率
 
+重复注册同一个人脸时，覆盖原有照片
+
 """
 
 class Detector:
@@ -91,35 +93,61 @@ class Detector:
     def detect_faces(self, img_path):
         try:
             """检测图片中的人脸，并返回最中心的人脸"""
-
-            faces = DeepFace.extract_faces(img_path, detector_backend="retinaface", align=True, enforce_detection=True)
-            # face = DeepFace.extract_faces(img_path, detector_backend="opencv", align=True, enforce_detection=True)
             img = cv2.imread(img_path)
+            if img is None:
+                return None
+
+            # K4A彩色图为1080P，直接用RetinaFace推理耗时较长。
+            # 将检测宽度限制为960像素；保存照片和读取深度时再映射回原图坐标。
+            img_height, img_width = img.shape[:2]
+            detect_scale = min(1.0, 960.0 / img_width)
+            if detect_scale < 1.0:
+                detect_img = cv2.resize(
+                    img,
+                    None,
+                    fx=detect_scale,
+                    fy=detect_scale,
+                    interpolation=cv2.INTER_AREA
+                )
+            else:
+                detect_img = img
+
+            faces = DeepFace.extract_faces(
+                detect_img,
+                detector_backend="retinaface",
+                align=True,
+                enforce_detection=True
+            )
 
             center_face = None
-            min_distance = float('inf')
             min_depth = float('inf')
-            face_depth = 0
             if len(faces) > 0:
-                img_height, img_width = img.shape[:2]  # 获取图像尺寸
-                img_center_x, img_center_y = img_width / 2, img_height / 2  # 计算图像中心点
+                depth_image = self.k4a.transform_depth_to_color(
+                    self.depth_image_handle,
+                    self.color_image_handle
+                )
+                depth_height, depth_width = depth_image.shape[:2]
 
                 for result in faces:
                     facial_area = result["facial_area"]
-                    x, y, w, h = facial_area["x"], facial_area["y"], facial_area["w"], facial_area["h"]
-                    face_center_x, face_center_y = x + w / 2, y + h / 2  # 计算人脸中心点
-                    # 获取深度
-                    depth_image = self.k4a.transform_depth_to_color(self.depth_image_handle, self.color_image_handle) 
-                    face_depth = depth_image[int(y+h/2), int(x+w/2)] * 0.001
-                    # print(f"距离:{face_depth} m")
-
-                    # 计算人脸中心点到图像中心点的距离
-                    # distance = ((img_center_x - face_center_x) ** 2 + (img_center_y - face_center_y) ** 2) ** 0.5
+                    x = int(round(facial_area["x"] / detect_scale))
+                    y = int(round(facial_area["y"] / detect_scale))
+                    w = int(round(facial_area["w"] / detect_scale))
+                    h = int(round(facial_area["h"] / detect_scale))
+                    center_x = min(max(x + w // 2, 0), depth_width - 1)
+                    center_y = min(max(y + h // 2, 0), depth_height - 1)
+                    face_depth = depth_image[center_y, center_x] * 0.001
 
                     # 找到最中心的人脸
                     if face_depth < min_depth and face_depth != 0:
                         min_depth = face_depth
-                        center_face = result
+                        center_face = dict(result)
+                        center_face["facial_area"] = {
+                            "x": x,
+                            "y": y,
+                            "w": w,
+                            "h": h
+                        }
 
                 if center_face is not None:
                     print("识别到人脸")
@@ -132,7 +160,8 @@ class Detector:
 
                     img_resized = self.resize_image(img, 0.5)
                     cv2.imshow("face_detect", img_resized)
-                    cv2.waitKey(2000)
+                    # 仅处理OpenCV窗口事件，不再为预览固定阻塞2秒。
+                    cv2.waitKey(50)
             # self.k4a.device_stop_cameras()
             # self.k4a.device_close()
             return center_face
@@ -484,26 +513,38 @@ class Detector:
         if face is None:
             return None
 
-        # 创建新 ID 前先检查是否已经注册，避免重复建立人脸目录。
+        # 创建新 ID 前先检查是否已经注册。
+        # 已注册的人脸复用原 ID，并用本次采集结果覆盖原照片。
         existing_person_id, best_distance = self._find_registered_face(face)
         if existing_person_id is not None:
-            self.detect_result = existing_person_id
             print(
                 f"该人脸已经注册，已有ID: {existing_person_id}，"
                 f"距离: {best_distance}"
             )
-            return None
+            new_person_id = existing_person_id
+            new_folder_path = os.path.join(
+                self.photopath,
+                str(new_person_id)
+            )
+            if os.path.exists(new_folder_path):
+                shutil.rmtree(new_folder_path)
+            os.makedirs(new_folder_path)
+            self.known_faces.pop(new_person_id, None)
+            print(f"正在覆盖人脸ID {new_person_id} 的原有照片")
+        else:
+            max_id = 0
+            for folder_name in os.listdir(self.photopath):
+                if folder_name.isdigit() and int(folder_name) > max_id:
+                    max_id = int(folder_name)
+            self.face_id_counter = max_id + 1
+            new_person_id = self.face_id_counter
+            new_folder_path = os.path.join(
+                self.photopath,
+                str(new_person_id)
+            )
+            os.makedirs(new_folder_path, exist_ok=True)
 
-        max_id = 0
-        for folder_name in os.listdir(self.photopath):
-            if folder_name.isdigit() and int(folder_name) > max_id:
-                max_id = int(folder_name)
-        self.face_id_counter = max_id + 1
-        new_person_id = self.face_id_counter
-
-        new_folder_path = os.path.join(self.photopath, str(new_person_id))
         self.face_folders[new_person_id] = new_folder_path
-        os.makedirs(new_folder_path, exist_ok=True)
 
         # --------------------------------------------------------------
         # 人脸注册采集方案：两种方案只能启用一种。
@@ -530,8 +571,12 @@ class Detector:
             f"人脸ID {new_person_id} 共保存 "
             f"{saved_face_count} 张注册照片"
         )
-        print("正在更新特征向量平均值...")
-        self.update_known_faces()
+        print(f"正在更新人脸ID {new_person_id} 的特征向量平均值...")
+        average_embedding = self.calculate_average_embedding(new_folder_path)
+        if average_embedding is not None:
+            self.known_faces[new_person_id] = average_embedding
+        else:
+            print(f"人脸ID {new_person_id} 没有可用的注册照片")
         return new_person_id
 
 

@@ -4,6 +4,7 @@
 """单独测试 jujia26.py 中三位主人的注册、姓名采集与人脸识别。"""
 
 from pathlib import Path
+import traceback
 
 import rospy
 
@@ -117,25 +118,41 @@ def register_owner(controller, owner_index):
     print(f"人脸注册成功，ID：{person_id}")
     speak_and_wait(controller, "人脸注册成功")
 
-    print(">>> [阶段2] 正在采集姓名...")
+    # 与 jujia26.Controller.register() 保持一致：先取得自由语法识别原文，
+    # 再匹配已有 target_name；未匹配到时把清理后的姓名现场加入名单。
+    print(
+        ">>> [阶段2] 正在采集姓名..."
+        "（先与 target_name 匹配；不在列表则新增）"
+    )
+    person_name = None
+    name_added = False
+    raw_name = ""
     try:
-        person_name, name_score, raw_name = (
-            controller.voice.ask_owner_name(
-                retries=3,
-                duration=5.0,
-            )
+        raw_name = controller.listen_owner_name_raw(
+            retries=3,
+            duration=5.0,
+        )
+        person_name, name_added = (
+            controller.resolve_owner_name_from_target(raw_name)
         )
     except Exception as error:
         print(f"姓名语音识别发生异常：{error}")
-        person_name = None
-        name_score = 0.0
-        raw_name = ""
+        traceback.print_exc()
 
     print(f"姓名识别原文：{raw_name}")
     print(f"姓名匹配结果：{person_name}")
-    print(f"姓名匹配置信度：{name_score:.2%}")
+    print(f"是否为现场新增姓名：{'是' if name_added else '否'}")
 
-    if person_name is None:
+    if person_name:
+        if name_added:
+            controller.voice.say(
+                f"好的，新增主人姓名，{person_name}",
+                wait=True,
+            )
+        else:
+            controller.voice.say(f"好的，{person_name}", wait=True)
+
+    if not person_name:
         print("姓名语音识别已达到最大尝试次数（3次）")
         speak_and_wait(controller, "姓名识别失败")
         return None
