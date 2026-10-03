@@ -45,6 +45,7 @@ import wave
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+import rospy
 
 try:
     import pyaudio
