@@ -134,7 +134,7 @@ class WaypointArm:
 
     def go_home(self):
         rospy.loginfo("[xg_arm_waypoints] 回 home 位 ...")
-        self.arm.arm_run(HOME_POSE)
+        return self.move_pose(HOME_POSE)
 
     def move_pose(self, pose6):
         """发送一个基座坐标系的完整 6 自由度位姿，返回是否成功。"""

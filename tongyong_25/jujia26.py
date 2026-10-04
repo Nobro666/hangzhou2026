@@ -134,6 +134,8 @@ class Controller:
         self.recognized_owner_ids = set()
         # 保存巡游识别结果
         self.owner_observations = {}
+        # 按开关机械臂按需初始化，避免主程序启动时重复等待Action Server。
+        self.switch_arm = None
       
         self.publish_initial_pose()
         time.sleep(1)
@@ -734,39 +736,58 @@ class Controller:
 
         print(f"主人要求：{switch_command}")
 
-        # 2. 根据需求识别对应开关标记
-        marker_position = None
-        # TODO 未实现：在这里直接调用现有目标检测模块，
-        # 根据 switch_command 找到对应开关标记并获取三维坐标。
-        # 再将坐标转换到机械臂控制接口要求的坐标系。
+        # arm_waypoints.py 当前提供的是一套已经标定好的固定开关路径。
+        # WAYPOINT_3 为按压点；完成按压后沿原路径撤回并返回Home位。
+        return self.execute_switch_waypoints(switch_command)
 
-        if marker_position is None:
-            print("开关标记定位尚未实现或未找到目标")
+
+    def execute_switch_waypoints(self, switch_command):
+        """执行固定开关路径：接近、按压、撤回并回到Home位。"""
+        try:
+            from arm_waypoints import WaypointArm, WAYPOINTS
+
+            if self.switch_arm is None:
+                self.switch_arm = WaypointArm()
+
+            print(f"开始执行开关动作：{switch_command}")
+            if not self.switch_arm.run_waypoints(WAYPOINTS):
+                print("机械臂未到达开关按压点")
+                return False
+
+            # 在最终按压点短暂停留，确保开关被触发。
+            rospy.sleep(0.5)
+
+            # 从按压点依次退回途经点2、途经点1。
+            retreat_waypoints = list(reversed(WAYPOINTS[:-1]))
+            if retreat_waypoints:
+                if not self.switch_arm.run_waypoints(retreat_waypoints):
+                    print("开关按压完成，但机械臂撤回失败")
+                    return False
+
+            if not self.switch_arm.go_home():
+                print("开关按压和撤回已完成，但机械臂返回Home位失败")
+                return False
+            print(f"开关动作执行完成：{switch_command}")
+            self.voice.say("开关操作已完成", wait=True)
+            return True
+        except (Exception, SystemExit) as error:
+            print(f"执行开关机械臂动作发生异常：{error}")
             return False
-
-        # 3. 执行机械臂动作
-        # TODO 未实现：机械臂函数暂时保留接口，返回 False。
-        return self.move_arm_above_switch_marker(marker_position)
 
 
     def handle_fall_behavior(self, person_name):
-        """主人摔倒：定位人体、执行机械臂动作。"""
+        """主人摔倒：机械臂直接伸到预先标定的固定位置。"""
+        try:
+            from arm2people_final import TARGET_POSE
 
-        self.voice.say(f"{person_name}，我来帮助你", wait=True)
-
-        # 1. 获取摔倒主人的身体位置
-        body_position = None
-        # TODO 未实现：在这里直接调用人体检测或骨架识别模块，
-        # 获取目标身体部位的三维坐标，并计算其上方的目标位置。
-        # 再将坐标转换到机械臂控制接口要求的坐标系。
-
-        if body_position is None:
-            print("摔倒人体定位尚未实现或未找到目标")
+            self.voice.say(f"{person_name}，我来帮助你", wait=True)
+            print(f"摔倒救助机械臂目标位姿：{TARGET_POSE}")
+            self.kinova.arm_run(unit="mq", pose_target=TARGET_POSE)
+            print("摔倒救助机械臂动作已执行")
+            return True
+        except (Exception, SystemExit) as error:
+            print(f"执行摔倒救助机械臂动作发生异常：{error}")
             return False
-
-        # 2. 执行机械臂动作
-        # TODO 未实现：机械臂函数暂时保留接口，返回 False。
-        return self.move_arm_above_person(body_position)
 
 
     def handle_wave_behavior(self, person_name):
