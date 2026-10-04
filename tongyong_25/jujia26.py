@@ -64,7 +64,8 @@ LOCATION = {
     "room3":[[7.157761356010285,-0.8594503723082786,0.13800000000000007],[0.0,0.0,-0.09600218141232529,0.9953811235723103]],
     "over":[[7.847181964561788,-1.0953564410234704,0.138],[0.0,0.0,-0.06472131177523377,0.9979033779891182]],
     "switch":[],
-    "trash_can":[]
+    "trash_can":[],
+    "bed":[]
 }
 
 # 主人要求关键词
@@ -86,6 +87,14 @@ ROOM_SCAN_STEP_DEGREES = 60.0
 ROOM_SCAN_DETECT_TIMEOUT = 2.0
 ROOM_SCAN_TURN_TIMEOUT = 8.0
 ROOM_SCAN_SETTLE_SECONDS = 0.5
+
+# Azure Kinect Body Tracking动态库及行为识别采样帧数。
+# 可通过环境变量覆盖动态库路径，便于不同机器人部署。
+BEHAVIOR_K4ABT_LIB_PATH = os.environ.get(
+    "K4ABT_LIB_PATH",
+    "/lib/libk4abt.so",
+)
+BEHAVIOR_RECOGNIZE_FRAMES = 20
 
 
 class Controller:
@@ -626,18 +635,65 @@ class Controller:
     
     def recognize_behavior(self, face_id, person_name):
         """
-        识别主人行为。
+        使用 behavior_detector.py 的 Azure Kinect 骨架识别器判断主人行为。
 
-        后续需要调用 Kinect 骨架或 YOLO Pose 实现：
-        1. 坐下或躺下；
-        2. 摔倒；
-        3. 挥手。
+        人物搜索和人脸识别均会占用同一台Kinect，因此在这里按需创建
+        BehaviorDetector，并在本次识别结束后立即释放设备。
         """
 
         print(f">>> 准备识别{person_name}的行为，人脸ID={face_id}")
-        # TODO 未实现：接入 Kinect 骨架识别或 YOLO Pose，并返回以下常量之一：
-        # ACTION_SIT_OR_LIE、ACTION_FALL、ACTION_WAVE。
-        return ACTION_UNKNOWN
+        behavior_detector = None
+        try:
+            # 延迟导入，避免程序启动阶段因Body Tracking运行库问题
+            # 影响导航、注册等不依赖姿态识别的功能。
+            from behavior_detector import (
+                BehaviorDetector,
+                POSE_FALLEN,
+                POSE_LYING,
+                POSE_SITTING,
+                POSE_STANDING,
+                POSE_WAVING,
+            )
+
+            print(
+                "正在启动Azure Kinect姿态识别，"
+                f"采样帧数={BEHAVIOR_RECOGNIZE_FRAMES}"
+            )
+            behavior_detector = BehaviorDetector(
+                BEHAVIOR_K4ABT_LIB_PATH
+            )
+            detected_behavior = behavior_detector.recognize(
+                frames=BEHAVIOR_RECOGNIZE_FRAMES
+            )
+            print(f"behavior_detector原始结果：{detected_behavior}")
+
+            behavior_mapping = {
+                POSE_SITTING: ACTION_SIT,
+                POSE_LYING: ACTION_LIE,
+                POSE_FALLEN: ACTION_FALL,
+                POSE_WAVING: ACTION_WAVE,
+            }
+            behavior = behavior_mapping.get(
+                detected_behavior,
+                ACTION_UNKNOWN,
+            )
+            if detected_behavior == POSE_STANDING:
+                print("检测到主人站立，但站立不属于当前任务行为")
+            elif detected_behavior is None:
+                print("姿态识别期间没有获得足够的有效骨架")
+            print(f"转换后的任务行为：{behavior}")
+            return behavior
+        except (Exception, SystemExit) as error:
+            print(f"姿态识别发生异常：{error}")
+            return ACTION_UNKNOWN
+        finally:
+            if behavior_detector is not None:
+                try:
+                    behavior_detector.close()
+                    print("姿态识别器和Kinect已释放")
+                except Exception as close_error:
+                    print(f"释放姿态识别器失败：{close_error}")
+            cv2.destroyAllWindows()
 
     # ===== 2026-09-20 修改：新增行为分发及后续机械臂动作主流程 =====
     def interact_with_human(self, observation):
