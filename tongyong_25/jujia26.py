@@ -14,11 +14,6 @@
 7. 从出口自主离场
 
 
-待完善功能：
-3.识别主人行为   recognize_behavior()
-4.根据行为完成人机交互   interact_with_human()
-5.寻找并清理垃圾   find_and_clean_garbage()
-
 函数复杂可新增文件
 """
 
@@ -96,6 +91,16 @@ BEHAVIOR_K4ABT_LIB_PATH = os.environ.get(
 )
 BEHAVIOR_RECOGNIZE_FRAMES = 20
 
+# 垃圾粗定位类别。应与Kinect检测模型和catch_ty.py中的RealSense
+# 垃圾模型类别保持一致。
+TRASH_TARGET_CLASSES = ["paper_ball", "empty_bottle"]
+TRASH_TARGET_COUNT = 3
+TRASH_SCAN_MAX_DISTANCE = 5.0
+TRASH_MODEL_PATH = os.environ.get(
+    "TRASH_MODEL_PATH",
+    "/home/zq/tongyong_25hyx/catch_ground/model/rubbish.pt",
+)
+
 
 class Controller:
     def __init__(self, name):
@@ -106,7 +111,7 @@ class Controller:
         self.location = LOCATION
         self.navigator = Navigator(self.location)
         self.transpoint = CoordinateConverter()
-        self.goalpoint = SmartGoalFinder()
+        self.Sgoalpoint = SmartGoalFinder()
         self.ftp = facetoPerson()
         print("==============导航初始化完成==============")
 
@@ -116,7 +121,8 @@ class Controller:
         self.detector = RealSenseYolo11Detector(weights=Path("/home/zq/catkin_ws/src/cmoon/src/hangzhou2026/tongyong_25/model/yolo11m.pt"))
         self.camera = KinectCamera()
         self.people_detector = PersonDetector()
-        self.items_detector = ItemsDetector()
+        # 垃圾模型按需加载，避免启动主程序时占用额外显存。
+        self.items_detector = None
         self.photo_path = '/home/zq/catkin_ws/src/cmoon/src/hangzhou2026/tongyong_25/face'  # 替换为你想要保存照片的路径
         self.face = Detector(self.photo_path)
         print("==============视觉初始化完成==============")
@@ -134,6 +140,9 @@ class Controller:
         self.recognized_owner_ids = set()
         # 保存巡游识别结果
         self.owner_observations = {}
+        # 保存已完成投放的垃圾数量及记录。
+        self.cleaned_trash_count = 0
+        self.trash_observations = []
         # 按开关机械臂按需初始化，避免主程序启动时重复等待Action Server。
         self.switch_arm = None
       
@@ -398,17 +407,8 @@ class Controller:
 
     def find_room(self):
         """
-        巡游四个房间，寻找主人并识别行为。
-
-        当前只实现主要任务流程：
-        1. 导航到房间；
-        2. 搜索人物；
-        3. 接近人物；
-        4. 识别主人；
-        5. 调用行为识别接口；
-        6. 保存识别结果。
+        巡游四个房间。每到一个房间，先执行人物任务，再执行垃圾任务。
         """
-
         self.voice.say("开始巡游房间", wait=True)
         room_results = []
 
@@ -422,87 +422,202 @@ class Controller:
                 print(f"无法到达{room_name}，跳过该房间")
                 continue
 
-            # 使用 detect_people.py
-            person_result = self.find_owner_in_room(room_name)
-            if person_result is None:
-                print(f"{room_name}中没有找到主人")
-                continue
+            observation = self.people_room(room_name)
+            if observation is not None:
+                room_results.append(observation)
 
-            # ===== 2026-09-20 修改：接近主人时传入转换后的地图坐标 =====
-            # 使用 camera_to_map.py 和 position_last_second.py
-            approach_success = self.approach_owner(person_result["map_coords"])
-            if not approach_success:
-                print(f"无法接近{room_name}中的人物")
-                continue
+            # 无论当前房间是否找到/认出主人，都继续检查房间垃圾。
+            self.trash_room(room_name)
 
-            # 使用 face_detect_tongyong.py
-            owner_result = self.recognize_owner()
-            if owner_result is None:
-                print(f"{room_name}中的人物不是已注册主人")
-                self.voice.say("没有识别出主人", wait=True)
-                continue
-
-            face_id = owner_result["face_id"]
-            owner_index = owner_result["owner_index"]
-            person_name = owner_result["person_name"]
-
-            # 避免重复识别同一个主人
-            if face_id in self.recognized_owner_ids:
-                print(f"{person_name}已经完成识别，跳过")
-                continue
-
-            self.voice.announce_owner_recognized(
-                person_name,
-                owner_index,
-            )
-
-            # ===== 2026-09-20 修改：统一调用行为识别接口 =====
-            behavior = self.recognize_behavior(face_id, person_name)
-
-            print("--------------------------------")
-            print("主人识别结果")
-            print(f"房间：{room_name}")
-            print(f"主人编号：{owner_index}")
-            print(f"人脸ID：{face_id}")
-            print(f"姓名：{person_name}")
-            print(f"行为：{behavior}")
-            print("--------------------------------")
-
-            self.voice.announce_behavior(behavior, person_name)
-
-            observation = {
-                "room_name": room_name,
-                "face_id": face_id,
-                "owner_index": owner_index,
-                "person_name": person_name,
-                "camera_coords": person_result[
-                    "camera_coords"
-                ],
-                "map_coords": person_result[
-                    "map_coords"
-                ],
-                "behavior": behavior,
-            }
-
-            # ===== 2026-09-20 修改：识别行为后执行对应的人机交互 =====
-            interaction_success = self.interact_with_human(observation)
-            observation["interaction_success"] = interaction_success
-            self.owner_observations[face_id] = observation
-
-            # 只有交互任务完成后，才将该主人标记为已完成。
-            if interaction_success:
-                self.recognized_owner_ids.add(face_id)
-            room_results.append(observation)
-
-            # 三位主人都找到后结束巡游
-            if len(self.recognized_owner_ids) >= 3:
-                print("三位主人均已找到")
+            if (len(self.recognized_owner_ids) >= 3 and
+                    self.cleaned_trash_count >= TRASH_TARGET_COUNT):
+                print("三位主人任务和三个垃圾任务均已完成")
                 break
-
-        # ===== 2026-09-20 修改：完成所有房间后再返回，避免只巡游第一个房间 =====
         print("巡游房间结束")
         print(f"共完成主人任务数量：{len(self.recognized_owner_ids)}")
+        print(f"共完成垃圾投放数量：{self.cleaned_trash_count}")
         return room_results
+
+
+    def people_room(self, room_name):
+        """执行当前房间的人物搜索、身份/行为识别和人机交互。"""
+        person_result = self.find_owner_in_room(room_name)
+        if person_result is None:
+            print(f"{room_name}中没有找到主人")
+            return None
+
+        if not self.approach_owner(person_result["map_coords"]):
+            print(f"无法接近{room_name}中的人物")
+            return None
+
+        owner_result = self.recognize_owner()
+        if owner_result is None:
+            print(f"{room_name}中的人物不是已注册主人")
+            self.voice.say("没有识别出主人", wait=True)
+            return None
+
+        face_id = owner_result["face_id"]
+        owner_index = owner_result["owner_index"]
+        person_name = owner_result["person_name"]
+        if face_id in self.recognized_owner_ids:
+            print(f"{person_name}已经完成识别，跳过重复交互")
+            return None
+
+        self.voice.announce_owner_recognized(person_name, owner_index)
+        behavior = self.recognize_behavior(face_id, person_name)
+        self.voice.announce_behavior(behavior, person_name)
+
+        observation = {
+            "room_name": room_name,
+            "face_id": face_id,
+            "owner_index": owner_index,
+            "person_name": person_name,
+            "camera_coords": person_result["camera_coords"],
+            "map_coords": person_result["map_coords"],
+            "behavior": behavior,
+        }
+        interaction_success = self.interact_with_human(observation)
+        observation["interaction_success"] = interaction_success
+        self.owner_observations[face_id] = observation
+        if interaction_success:
+            self.recognized_owner_ids.add(face_id)
+
+        print("--------------------------------")
+        print("主人识别结果")
+        print(f"房间：{room_name}")
+        print(f"主人编号：{owner_index}")
+        print(f"人脸ID：{face_id}")
+        print(f"姓名：{person_name}")
+        print(f"行为：{behavior}")
+        print("--------------------------------")
+        return observation
+
+
+    def trash_room(self, room_name):
+        """Kinect粗定位当前房间垃圾，接近后用RealSense抓取并投放。"""
+        if self.cleaned_trash_count >= TRASH_TARGET_COUNT:
+            print("三个垃圾均已投放，跳过后续垃圾搜索")
+            return None
+        
+        trash_result = self.find_trash_in_room(room_name)
+        if trash_result is None:
+            print(f"{room_name}中没有找到垃圾")
+            return None
+
+        trash_goal = self.goalpoint.find_best_goal(
+            trash_result["map_coords"]
+        )
+        if trash_goal is None:
+            print(f"没有找到{room_name}垃圾附近的安全导航点")
+            return None
+
+        self.location["current_trash"] = trash_goal
+        if not self.navigator.goto("current_trash"):
+            print(f"无法接近{room_name}中的垃圾")
+            return None
+
+        try:
+            # catch_ty中的方法与当前self.kinova使用相同的控制接口，
+            # 直接复用实例，避免再次rospy.init_node和重复连接Action Server。
+            from catch_ty import KinovaRobotGroud
+
+            grasp_result = KinovaRobotGroud.catch_ground(
+                self.kinova,
+                weights_path=TRASH_MODEL_PATH,
+            )
+            if not grasp_result:
+                print(f"{room_name}垃圾抓取失败")
+                return None
+
+            if not self.navigator.goto("trash_can"):
+                print("已执行垃圾抓取，但无法到达垃圾桶")
+                return None
+
+            put_result = KinovaRobotGroud.put_rubbish(self.kinova)
+            if not put_result:
+                print("到达垃圾桶，但垃圾投放失败")
+                return None
+        except (Exception, SystemExit) as error:
+            print(f"{room_name}垃圾抓取或投放发生异常：{error}")
+            return None
+
+        self.cleaned_trash_count += 1
+        trash_result["put_success"] = True
+        self.trash_observations.append(trash_result)
+        print(
+            f"{room_name}垃圾已投放，"
+            f"完成数量={self.cleaned_trash_count}/{TRASH_TARGET_COUNT}"
+        )
+        return trash_result
+
+
+    def find_trash_in_room(self, room_name):
+        """使用头顶Kinect分段扫描垃圾并返回相机/地图坐标。"""
+        found_name = None
+        camera_coords = None
+        try:
+            if self.items_detector is None:
+                self.items_detector = ItemsDetector(
+                    model_path=TRASH_MODEL_PATH,
+                )
+            self.camera.open_camera()
+            for view_index in range(ROOM_SCAN_VIEW_COUNT):
+                if rospy.is_shutdown():
+                    break
+
+                print(
+                    f"{room_name}垃圾扫描方向 "
+                    f"{view_index + 1}/{ROOM_SCAN_VIEW_COUNT}"
+                )
+                for target_name in TRASH_TARGET_CLASSES:
+                    has_target, coords = self.items_detector.detect(
+                        self.camera,
+                        target=target_name,
+                        max_distance=TRASH_SCAN_MAX_DISTANCE,
+                        timeout=ROOM_SCAN_DETECT_TIMEOUT,
+                    )
+                    if has_target:
+                        found_name = target_name
+                        camera_coords = coords
+                        break
+                if found_name is not None:
+                    break
+
+                if not self.base.turn(
+                    ROOM_SCAN_STEP_DEGREES,
+                    timeout=ROOM_SCAN_TURN_TIMEOUT,
+                ):
+                    print(f"{room_name}垃圾扫描转向失败")
+                    break
+                rospy.sleep(ROOM_SCAN_SETTLE_SECONDS)
+        except Exception as error:
+            print(f"{room_name}垃圾粗定位发生异常：{error}")
+        finally:
+            try:
+                self.camera.release()
+            except Exception:
+                pass
+            cv2.destroyAllWindows()
+
+        if found_name is None or camera_coords is None:
+            return None
+
+        map_coords = self.transpoint.get_map_coords(camera_coords)
+        if map_coords is None:
+            print(f"{room_name}垃圾地图坐标转换失败")
+            return None
+
+        self.voice.announce_trash_found(found_name, room_name)
+        print(
+            f"{room_name}发现垃圾：{found_name}，"
+            f"相机坐标={camera_coords}，地图坐标={map_coords}"
+        )
+        return {
+            "room_name": room_name,
+            "trash_name": found_name,
+            "camera_coords": camera_coords,
+            "map_coords": map_coords,
+        }
 
     def find_owner_in_room(self, room_name):
         """
@@ -862,8 +977,13 @@ class Controller:
 
 
 
-        "---捡垃圾并投放垃圾桶---"
-        #待实现
+        print("房间垃圾处理结果：")
+        print(f"已完成投放数量：{self.cleaned_trash_count}")
+        for result in self.trash_observations:
+            print(
+                f"{result['room_name']}：{result['trash_name']}，"
+                f"地图坐标={result['map_coords']}"
+            )
 
 
 

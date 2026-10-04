@@ -473,7 +473,7 @@ class KinovaRobotGroud:
         print("-----到达检测位-----")
         self.arm_run(pose_target=position_down)
 
-    def catch_ground(self):
+    def catch_ground(self, weights_path=None):
         # 误差
         x_down = 0.633305
         y_down = -0.195270
@@ -486,7 +486,9 @@ class KinovaRobotGroud:
         print("-----到达检测位-----")
         self.arm_run(pose_target=position_down)
         rospy.timer.sleep(3)
-        detector = RealSenseYolo11Detector(weights=Path("/home/zq/tongyong_25hyx/catch_ground/model/rubbish.pt"))
+        if weights_path is None:
+            weights_path = "/home/zq/tongyong_25hyx/catch_ground/model/rubbish.pt"
+        detector = RealSenseYolo11Detector(weights=Path(weights_path))
         print("1")
         result = detector.detect_targets(target_items = ["paper_ball","empty_bottle"])
         print("2")
@@ -504,7 +506,7 @@ class KinovaRobotGroud:
                 import traceback
                 print("DEBUG: finger_run 异常：{}".format(error))
                 traceback.print_exc()
-                return
+                return False
                 
             turn_angle=result.angle-89.4
             print("turn_angle:",turn_angle)
@@ -525,6 +527,11 @@ class KinovaRobotGroud:
             self.finger_run(finger_target=[75,75,75])
             self.finger_run(finger_target=[100,100,100])
             self.arm_run(pose_target=home_position)
+            return True
+
+        print("————未检测到可抓取的垃圾————")
+        self.arm_run(pose_target=home_position)
+        return False
             
         # else:
         #     print("-----未检测到目标物品-----")
@@ -544,6 +551,7 @@ class KinovaRobotGroud:
         self.finger_run(finger_target=[25,25,25])
         self.finger_run(finger_target=[0,0,0])
         self.arm_run(pose_target=home_position)
+        return True
 
             
 
@@ -563,6 +571,3 @@ if __name__ == "__main__":
     kinova.put_rubbish()
     # kinova.catch_table(target=["Sprite"])
     # kinova.getcurrentCartesianCommand()
-    
-    
-    

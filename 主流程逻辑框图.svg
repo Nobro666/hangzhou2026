@@ -1,0 +1,113 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="2200" viewBox="0 0 1600 2200">
+  <defs>
+    <style>
+      .title { font: 700 42px "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; fill: #17324d; }
+      .subtitle { font: 400 21px "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; fill: #52677b; }
+      .section { font: 700 28px "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; fill: #17324d; }
+      .nodeTitle { font: 700 23px "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; fill: #17324d; }
+      .nodeText { font: 400 20px "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; fill: #29445c; }
+      .small { font: 400 18px "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; fill: #52677b; }
+      .label { font: 700 18px "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; fill: #29445c; }
+      .box { stroke: #4d7395; stroke-width: 2.5; rx: 18; ry: 18; }
+      .arrow { stroke: #3d5f7a; stroke-width: 3; fill: none; marker-end: url(#arrow); }
+      .dash { stroke: #7c93a8; stroke-width: 2.5; fill: none; stroke-dasharray: 10 8; marker-end: url(#arrowSoft); }
+    </style>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M0,0 L12,6 L0,12 Z" fill="#3d5f7a"/>
+    </marker>
+    <marker id="arrowSoft" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M0,0 L12,6 L0,12 Z" fill="#7c93a8"/>
+    </marker>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="5" stdDeviation="6" flood-color="#17324d" flood-opacity="0.13"/>
+    </filter>
+  </defs>
+
+  <rect width="1600" height="2200" fill="#f5f8fb"/>
+  <rect x="0" y="0" width="1600" height="150" fill="#e5f0f8"/>
+  <text x="800" y="66" text-anchor="middle" class="title">jujia26.py 当前主流程逻辑框图</text>
+  <text x="800" y="108" text-anchor="middle" class="subtitle">每个房间固定顺序：people_room → trash_room</text>
+
+  <!-- Main flow -->
+  <text x="95" y="205" class="section">1. 主控流程 control()</text>
+
+  <ellipse cx="800" cy="255" rx="125" ry="42" fill="#d7f3e4" stroke="#31845c" stroke-width="3" filter="url(#shadow)"/>
+  <text x="800" y="263" text-anchor="middle" class="nodeTitle">程序启动</text>
+
+  <rect x="570" y="335" width="460" height="105" class="box" fill="#ffffff" filter="url(#shadow)"/>
+  <text x="800" y="374" text-anchor="middle" class="nodeTitle">初始化系统</text>
+  <text x="800" y="407" text-anchor="middle" class="nodeText">ROS、导航、底盘、机械臂、视觉、语音</text>
+
+  <rect x="570" y="480" width="460" height="105" class="box" fill="#edf6ff" filter="url(#shadow)"/>
+  <text x="800" y="519" text-anchor="middle" class="nodeTitle">自主进场</text>
+  <text x="800" y="552" text-anchor="middle" class="nodeText">发布初始位姿 → chu → start</text>
+
+  <rect x="570" y="625" width="460" height="105" class="box" fill="#fff3dc" filter="url(#shadow)"/>
+  <text x="800" y="664" text-anchor="middle" class="nodeTitle">注册 3 位主人</text>
+  <text x="800" y="697" text-anchor="middle" class="nodeText">人脸注册 + 姓名语音识别 + 保存映射</text>
+
+  <rect x="420" y="775" width="760" height="455" rx="28" ry="28" fill="#eef3fa" stroke="#456b8c" stroke-width="3" filter="url(#shadow)"/>
+  <text x="800" y="820" text-anchor="middle" class="section">循环巡游 room0 ～ room3</text>
+
+  <rect x="560" y="850" width="480" height="80" class="box" fill="#ffffff"/>
+  <text x="800" y="899" text-anchor="middle" class="nodeTitle">导航到当前房间</text>
+
+  <rect x="490" y="970" width="620" height="85" class="box" fill="#e9ddff"/>
+  <text x="800" y="1004" text-anchor="middle" class="nodeTitle">people_room(room_name)</text>
+  <text x="800" y="1035" text-anchor="middle" class="small">人物搜索、身份/姿态识别、人机交互</text>
+
+  <rect x="490" y="1090" width="620" height="85" class="box" fill="#dcf4ee"/>
+  <text x="800" y="1124" text-anchor="middle" class="nodeTitle">trash_room(room_name)</text>
+  <text x="800" y="1155" text-anchor="middle" class="small">垃圾粗定位、精确抓取、导航投放</text>
+
+  <path d="M800 297 L800 335" class="arrow"/>
+  <path d="M800 440 L800 480" class="arrow"/>
+  <path d="M800 585 L800 625" class="arrow"/>
+  <path d="M800 730 L800 775" class="arrow"/>
+  <path d="M800 930 L800 970" class="arrow"/>
+  <path d="M800 1055 L800 1090" class="arrow"/>
+
+  <polygon points="800,1270 965,1340 800,1410 635,1340" fill="#fff2c2" stroke="#b98518" stroke-width="3" filter="url(#shadow)"/>
+  <text x="800" y="1329" text-anchor="middle" class="nodeTitle">三位主人与三个垃圾</text>
+  <text x="800" y="1361" text-anchor="middle" class="nodeTitle">是否全部完成？</text>
+
+  <path d="M800 1230 L800 1270" class="arrow"/>
+  <path d="M635 1340 L280 1340 L280 890 L560 890" class="arrow"/>
+  <text x="300" y="1320" class="label">否：进入下一房间</text>
+
+  <rect x="570" y="1460" width="460" height="95" class="box" fill="#ffffff" filter="url(#shadow)"/>
+  <text x="800" y="1498" text-anchor="middle" class="nodeTitle">输出巡游结果</text>
+  <text x="800" y="1530" text-anchor="middle" class="nodeText">主人行为 + 垃圾投放记录</text>
+  <path d="M800 1410 L800 1460" class="arrow"/>
+  <text x="825" y="1442" class="label">是／房间循环结束</text>
+
+  <rect x="570" y="1595" width="460" height="90" class="box" fill="#edf6ff" filter="url(#shadow)"/>
+  <text x="800" y="1648" text-anchor="middle" class="nodeTitle">自主离场：navigate("over")</text>
+  <path d="M800 1555 L800 1595" class="arrow"/>
+
+  <ellipse cx="800" cy="1755" rx="125" ry="42" fill="#d7f3e4" stroke="#31845c" stroke-width="3" filter="url(#shadow)"/>
+  <text x="800" y="1763" text-anchor="middle" class="nodeTitle">任务结束</text>
+  <path d="M800 1685 L800 1713" class="arrow"/>
+
+  <!-- Detail panels -->
+  <text x="95" y="1870" class="section">2. 房间内两个阶段的内部逻辑</text>
+
+  <rect x="70" y="1910" width="700" height="225" rx="22" ry="22" fill="#f2ebff" stroke="#7755a6" stroke-width="3"/>
+  <text x="420" y="1952" text-anchor="middle" class="nodeTitle">people_room</text>
+  <text x="110" y="1993" class="nodeText">① Kinect 分 6 个方向搜索人物</text>
+  <text x="110" y="2027" class="nodeText">② 相机坐标 → TF 地图坐标 → 安全靠近点</text>
+  <text x="110" y="2061" class="nodeText">③ 人脸识别 → 姿态识别 → 人机交互</text>
+  <text x="110" y="2095" class="nodeText">④ 交互成功后记录该主人</text>
+
+  <rect x="830" y="1910" width="700" height="225" rx="22" ry="22" fill="#e7f7f2" stroke="#31846d" stroke-width="3"/>
+  <text x="1180" y="1952" text-anchor="middle" class="nodeTitle">trash_room</text>
+  <text x="870" y="1993" class="nodeText">① 头顶 Kinect + rubbish.pt 粗定位垃圾</text>
+  <text x="870" y="2027" class="nodeText">② 计算安全点并导航到垃圾附近</text>
+  <text x="870" y="2061" class="nodeText">③ catch_ty.catch_ground：RealSense 精定位并抓取</text>
+  <text x="870" y="2095" class="nodeText">④ 导航到 trash_can → put_rubbish → 计数 +1</text>
+
+  <path d="M770 2020 L830 2020" class="dash"/>
+  <text x="800" y="1998" text-anchor="middle" class="small">顺序</text>
+
+  <text x="800" y="2170" text-anchor="middle" class="subtitle">无人、未识别到主人或人物交互失败，都不会阻止当前房间继续执行 trash_room。</text>
+</svg>

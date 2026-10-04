@@ -176,7 +176,8 @@ class ItemsDetector:
         except:
             return None
 
-    def detect(self, camera, target='person', max_distance=None, depth=True):
+    def detect(self, camera, target='person', max_distance=None, depth=True,
+               timeout=8):
         """
         检测指定目标并返回其三维坐标，参考detect_people.py的返回格式
         参数:
@@ -184,14 +185,13 @@ class ItemsDetector:
             target: 目标物品名称
             max_distance: 最大检测距离(米)，None表示不限制
             depth: 是否使用深度信息
+            timeout: 本次检测的最大等待时间（秒）
         返回:
             (has_target, 3d_coords)
             has_target: 布尔值，表示是否检测到目标
             3d_coords: 三维坐标元组(x, y, z)，若未检测到则为(0, 0, 0)
         """
         start_time = time.time()
-        timeout = 8  # 超时时间(秒)
-        
         while time.time() - start_time < timeout:
             ret, color_frame = camera.get_frame()
             if not ret:
