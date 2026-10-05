@@ -111,7 +111,7 @@ class Controller:
         self.location = LOCATION
         self.navigator = Navigator(self.location)
         self.transpoint = CoordinateConverter()
-        self.Sgoalpoint = SmartGoalFinder()
+        self.goalpoint = SmartGoalFinder()
         self.ftp = facetoPerson()
         print("==============导航初始化完成==============")
 
@@ -227,14 +227,14 @@ class Controller:
         wait_duration = 5.0 
 
         # 2. 设置你的机器人在 'map' 坐标系下的初始坐标 (单位：米)
-        pos_x = 0.13158331728377007  # <-- 在这里填入你的X坐标
-        pos_y = -0.006716505400027814  # <-- 在这里填入你的Y坐标
+        pos_x = 0.1686358744614841  # <-- 在这里填入你的X坐标
+        pos_y = -0.0372035539253579  # <-- 在这里填入你的Y坐标
         
         # 3. 设置你的机器人的初始朝向 (四元数)
         quat_x = 0.0  # <-- 在这里填入你的四元数X
         quat_y = 0.0  # <-- 在这里填入你的四元数Y
-        quat_z = 0.0010637781280346942  # <-- 在这里填入你的四元数Z
-        quat_w = 0.9999994341878871  # <-- 在这里填入你的四元数W
+        quat_z = 0.06810539735143235  # <-- 在这里填入你的四元数Z
+        quat_w = 0.9976781318900417  # <-- 在这里填入你的四元数W
         # --- 配置结束 ---
 
         # 创建一个发布者，发布到 /initialpose 话题
@@ -279,7 +279,7 @@ class Controller:
         pub.publish(initial_pose_msg)
         
         # 再次发布几次以确保 amcl 能够接收到
-        rospy.sleep(0.5)
+        rospy.sleep(1.0)
         pub.publish(initial_pose_msg)
 
         rospy.loginfo("初始位姿发布成功！节点将退出。")
@@ -941,7 +941,7 @@ class Controller:
 
         """---注册主人---"""
         register_results = []
-        for i in range(3):
+        for i in range(1):
             result = self.register(i + 1)
             if result is not None:
                 register_results.append(result)

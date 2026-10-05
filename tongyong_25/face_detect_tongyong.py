@@ -627,7 +627,7 @@ class Detector:
             
 
             # 检查匹配结果
-            if best_match is not None and best_distance < 0.5:
+            if best_match is not None and best_distance < 0.6:
                 print(f"检测到主人：{best_match}，距离{best_distance}")
                 self.detect_result = best_match     # 将检测结果保存在 detect_result 里
                 result[0] = items[1]

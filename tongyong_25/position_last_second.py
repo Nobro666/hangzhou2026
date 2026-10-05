@@ -28,7 +28,7 @@ class SmartGoalFinder:
         self.robot_base_frame = 'base_link'
         self.map_frame = 'map'
 
-        self.MAX_SEARCH_RADIUS = 0.6
+        self.MAX_SEARCH_RADIUS = 1.0
         self.MIN_SEARCH_RADIUS = 0.3
         
         self.RADIUS_STEP = 0.05
