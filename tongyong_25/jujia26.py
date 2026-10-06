@@ -963,7 +963,6 @@ class Controller:
         print(f"主人信息表: {self.person_info}")
 
 
-
         """---巡游四个房间---"""
         # self.navigator.goto("room0")
         # self.navigator.goto("room1")
@@ -981,8 +980,6 @@ class Controller:
             print(f"行为：{result['behavior']}")
             print("--------------------------------")
 
-
-
         print("房间垃圾处理结果：")
         print(f"已完成投放数量：{self.cleaned_trash_count}")
         for result in self.trash_observations:
@@ -990,8 +987,6 @@ class Controller:
                 f"{result['room_name']}：{result['trash_name']}，"
                 f"地图坐标={result['map_coords']}"
             )
-
-
 
         """---自主离场---"""
         self.voice.say("开始自主离场", wait=True)
