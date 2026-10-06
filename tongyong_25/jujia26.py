@@ -94,12 +94,12 @@ OWNER_GOAL_MAX_RADIUS = 1.8
 OWNER_GOAL_MIN_RADIUS = 1.6
 
 # 完成人脸和姿态识别后，使用同一个人物地图坐标再次规划更近的导航点。
-OWNER_CLOSE_MAX_RADIUS = 0.9
-OWNER_CLOSE_MIN_RADIUS = 0.8
+OWNER_CLOSE_MAX_RADIUS = 1.3
+OWNER_CLOSE_MIN_RADIUS = 1.0
 
 # 垃圾抓取仍使用较近的导航距离，避免受人物识别距离影响。
-TRASH_GOAL_MAX_RADIUS = 0.6
-TRASH_GOAL_MIN_RADIUS = 0.3
+TRASH_GOAL_MAX_RADIUS = 0.9
+TRASH_GOAL_MIN_RADIUS = 0.6
 
 # Azure Kinect Body Tracking动态库及行为识别采样帧数。
 # 可通过环境变量覆盖动态库路径，便于不同机器人部署。
@@ -111,12 +111,12 @@ BEHAVIOR_RECOGNIZE_FRAMES = 20
 
 # 垃圾粗定位类别。应与Kinect检测模型和catch_ty.py中的RealSense
 # 垃圾模型类别保持一致。
-TRASH_TARGET_CLASSES = ["paper_ball", "empty_bottle"]
+TRASH_TARGET_CLASSES = ["empty_bottle"]
 TRASH_TARGET_COUNT = 3
 TRASH_SCAN_MAX_DISTANCE = 5.0
 TRASH_MODEL_PATH = os.environ.get(
     "TRASH_MODEL_PATH",
-    "/home/zq/tongyong_25hyx/catch_ground/model/rubbish.pt",
+    "/home/zq/catkin_ws/src/cmoon/src/hangzhou2026/tongyong_25/model/best5.pt",
 )
 
 
@@ -953,6 +953,12 @@ class Controller:
             print(f"摔倒救助机械臂目标位姿：{TARGET_POSE}")
             self.kinova.arm_run(unit="mq", pose_target=TARGET_POSE)
             print("摔倒救助机械臂动作已执行")
+
+            home_pose = list(self.kinova.homePositionMdeg)
+            print(f"摔倒救助动作完成，机械臂开始回原位：{home_pose}")
+            self.kinova.arm_run(unit="mdeg", pose_target=home_pose)
+            print("机械臂已回到原位")
+
             return True
         except (Exception, SystemExit) as error:
             print(f"执行摔倒救助机械臂动作发生异常：{error}")

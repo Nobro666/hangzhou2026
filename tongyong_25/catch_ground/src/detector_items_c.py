@@ -337,7 +337,12 @@ class ItemsDetector:
     
     def pred(self):
         """Run YOLO prediction on frame"""
-        results = self.model(self.color_frame)
+        results = self.model(
+            self.color_frame,
+            imgsz=1280,
+            conf=0.15,
+            verbose=False,
+        )
         self.color_frame = results[0].plot()
         model_names = results[0].names
         

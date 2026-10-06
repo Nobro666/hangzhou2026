@@ -487,10 +487,10 @@ class KinovaRobotGroud:
         self.arm_run(pose_target=position_down)
         rospy.timer.sleep(3)
         if weights_path is None:
-            weights_path = "/home/zq/catkin_ws/src/cmoon/src/hangzhou2026/tongyong_25/model/best.pt"
+            weights_path = "/home/zq/catkin_ws/src/cmoon/src/hangzhou2026/tongyong_25/model/best5.pt"
         detector = RealSenseYolo11Detector(weights=Path(weights_path))
         print("1")
-        result = detector.detect_targets(target_items = ["sprite"])
+        result = detector.detect_targets(target_items = ["empty_bottle"])
         print("2")
         if result:
             print("------识别成功------")
