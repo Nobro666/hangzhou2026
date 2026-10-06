@@ -865,45 +865,34 @@ class Controller:
         if not switch_command:
             print("未获取到开关需求")
             return False
+        # 优先匹配完整动词，不能只判断单个“开、关”。
+        if any(word in switch_command for word in ("关闭", "关掉", "关上", "关灯")):
+            switch_action = "close"
+        elif any(word in switch_command for word in ("打开", "开启", "开灯")):
+            switch_action = "open"
+        elif switch_command == "关":
+            switch_action = "close"
+        elif switch_command == "开":
+            switch_action = "open"
+        else:
+            print(f"无法判断开关需求：{switch_command}")
+            self.voice.say("没有听清需要打开还是关闭", wait=True)
+            return False
 
-        print(f"主人要求：{switch_command}")
-
-        # arm_waypoints.py 当前提供的是一套已经标定好的固定开关路径。
-        # WAYPOINT_3 为按压点；完成按压后沿原路径撤回并返回Home位。
-        return self.execute_switch_waypoints(switch_command)
-
-
-    def execute_switch_waypoints(self, switch_command):
-        """执行固定开关路径：接近、按压、撤回并回到Home位。"""
         try:
-            from arm_waypoints import WaypointArm, WAYPOINTS
-
-            if self.switch_arm is None:
-                self.switch_arm = WaypointArm()
-
-            print(f"开始执行开关动作：{switch_command}")
-            if not self.switch_arm.run_waypoints(WAYPOINTS):
-                print("机械臂未到达开关按压点")
-                return False
-
-            # 在最终按压点短暂停留，确保开关被触发。
-            rospy.sleep(0.5)
-
-            # 从按压点依次退回途经点2、途经点1。
-            retreat_waypoints = list(reversed(WAYPOINTS[:-1]))
-            if retreat_waypoints:
-                if not self.switch_arm.run_waypoints(retreat_waypoints):
-                    print("开关按压完成，但机械臂撤回失败")
-                    return False
-
-            if not self.switch_arm.go_home():
-                print("开关按压和撤回已完成，但机械臂返回Home位失败")
-                return False
-            print(f"开关动作执行完成：{switch_command}")
-            self.voice.say("开关操作已完成", wait=True)
-            return True
+            import switch as switch_controller
+            print(
+                f"开始执行开关动作："
+                f"{'打开' if switch_action == 'open' else '关闭'}"
+            )
+            success = switch_controller.go_to(switch_action)
+            if success:
+                self.voice.say("开关操作已完成", wait=True)
+            else:
+                self.voice.say("开关操作失败", wait=True)
+            return success
         except (Exception, SystemExit) as error:
-            print(f"执行开关机械臂动作发生异常：{error}")
+            print(f"执行开关动作发生异常：{error}")
             return False
 
 

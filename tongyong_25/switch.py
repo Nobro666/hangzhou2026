@@ -66,7 +66,7 @@ class KinovaArm:
         self.goal.pose.header = std_msgs.msg.Header(frame_id=p + 'link_base')
 
         self.finger_client = actionlib.SimpleActionClient(
-            '/' + p + 'driver/finger_action/gripper_command',
+            '/' + p + 'driver/fingers_action/finger_positions',
             kinova_msgs.msg.SetFingersPositionAction)
         self.finger_client.wait_for_server(rospy.Duration(5.0))
 
