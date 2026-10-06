@@ -17,6 +17,8 @@
 躺着的人可能识别不到，调整找人逻辑，直接导航到床边？
 坐着只可能出现在客厅，躺着只可能出现在卧室，是否可以简化判定逻辑
 后期需添加超时直接自主离场，确保能拿到自主离场的分数
+人物需限制在房间范围内
+识别出主人后需靠近进行人机交互
 
 函数复杂可新增文件
 """
@@ -90,6 +92,11 @@ ROOM_SCAN_SETTLE_SECONDS = 0.5
 # 人物识别需要保留较远距离，确保站立、坐下或躺下时脸部能够进入画面。
 OWNER_GOAL_MAX_RADIUS = 1.3
 OWNER_GOAL_MIN_RADIUS = 1.1
+
+# 完成人脸和姿态识别后，再使用同一个人物地图坐标靠近主人。
+# 该距离仅供后续人机交互使用，不影响远距离的人脸和姿态识别。
+OWNER_CLOSE_MAX_RADIUS = 0.9
+OWNER_CLOSE_MIN_RADIUS = 0.8
 
 # 垃圾抓取仍使用较近的导航距离，避免受人物识别距离影响。
 TRASH_GOAL_MAX_RADIUS = 0.6
@@ -487,6 +494,16 @@ class Controller:
             "map_coords": person_result["map_coords"],
             "behavior": behavior,
         }
+
+        # 人脸和姿态识别均在较远距离完成。只有已经识别到需要执行的
+        # 交互行为时，才在执行对应动作前第二次靠近主人。
+        if behavior != ACTION_UNKNOWN:
+            if not self.approach_owner_closer(person_result["map_coords"]):
+                print(f"无法进一步接近{room_name}中的主人，取消人机交互")
+                observation["interaction_success"] = False
+                self.owner_observations[face_id] = observation
+                return observation
+
         interaction_success = self.interact_with_human(observation)
         observation["interaction_success"] = interaction_success
         self.owner_observations[face_id] = observation
@@ -731,6 +748,32 @@ class Controller:
         except Exception as error:
             print(f"导航到人物附近失败：{error}")
             return False
+
+
+    def approach_owner_closer(self, person_map):
+        """
+        人脸和姿态识别完成后，根据同一个人物地图坐标再次靠近。
+        """
+        person_close_goal = self.goalpoint.find_best_goal(
+            person_map,
+            max_radius=OWNER_CLOSE_MAX_RADIUS,
+            min_radius=OWNER_CLOSE_MIN_RADIUS,
+        )
+        if person_close_goal is None:
+            print("没有找到人物附近更近的安全导航点")
+            return False
+
+        self.location["current_person_close"] = person_close_goal
+        try:
+            print(
+                "准备第二次接近主人，"
+                f"目标距离范围：{OWNER_CLOSE_MIN_RADIUS}"
+                f"～{OWNER_CLOSE_MAX_RADIUS}米"
+            )
+            return self.navigator.goto("current_person_close")
+        except Exception as error:
+            print(f"第二次接近主人失败：{error}")
+            return False
         
         
     def recognize_owner(self):
@@ -881,6 +924,7 @@ class Controller:
 
         try:
             import switch as switch_controller
+            # self.navigator.goto("switch")
             print(
                 f"开始执行开关动作："
                 f"{'打开' if switch_action == 'open' else '关闭'}"
