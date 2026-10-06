@@ -17,6 +17,8 @@
 躺着的人可能识别不到，调整找人逻辑，直接导航到床边？
 坐着只可能出现在客厅，躺着只可能出现在卧室，是否可以简化判定逻辑
 后期需添加超时直接自主离场，确保能拿到自主离场的分数
+人物需限制在房间范围内
+识别出主人后需靠近进行人机交互
 
 函数复杂可新增文件
 """
@@ -91,7 +93,7 @@ ROOM_SCAN_SETTLE_SECONDS = 0.5
 OWNER_GOAL_MAX_RADIUS = 1.8
 OWNER_GOAL_MIN_RADIUS = 1.6
 
-# 确认主人身份后，使用同一个人物地图坐标再次规划更近的导航点。
+# 完成人脸和姿态识别后，使用同一个人物地图坐标再次规划更近的导航点。
 OWNER_CLOSE_MAX_RADIUS = 0.9
 OWNER_CLOSE_MIN_RADIUS = 0.8
 
@@ -466,25 +468,22 @@ class Controller:
             return None
 
         owner_result = self.recognize_owner()
-        if owner_result is None:
+        owner_recognized = owner_result is not None
+        if not owner_recognized:
             print(f"{room_name}中的人物不是已注册主人")
             self.voice.say("没有识别出主人", wait=True)
-            return None
+            face_id = None
+            owner_index = None
+            person_name = "未知人物"
+        else:
+            face_id = owner_result["face_id"]
+            owner_index = owner_result["owner_index"]
+            person_name = owner_result["person_name"]
+            if face_id in self.recognized_owner_ids:
+                print(f"{person_name}已经完成识别，跳过重复交互")
+                return None
+            self.voice.announce_owner_recognized(person_name, owner_index)
 
-        face_id = owner_result["face_id"]
-        owner_index = owner_result["owner_index"]
-        person_name = owner_result["person_name"]
-        if face_id in self.recognized_owner_ids:
-            print(f"{person_name}已经完成识别，跳过重复交互")
-            return None
-
-        # 人脸识别阶段保持较远距离；确认主人后再靠近，供后续行为
-        # 识别和人机交互使用。第二次导航仍使用最初检测到的人物坐标。
-        if not self.approach_owner_closer(person_result["map_coords"]):
-            print(f"无法进一步接近{room_name}中的主人")
-            return None
-
-        self.voice.announce_owner_recognized(person_name, owner_index)
         behavior = self.recognize_behavior(face_id, person_name)
         self.voice.announce_behavior(behavior, person_name)
 
@@ -497,10 +496,23 @@ class Controller:
             "map_coords": person_result["map_coords"],
             "behavior": behavior,
         }
+        observation_key = (
+            face_id if face_id is not None else f"unknown_{room_name}"
+        )
+
+        # 人脸和姿态识别均在较远距离完成。只有已经识别到需要执行的
+        # 交互行为时，才在执行对应动作前第二次靠近主人。
+        if behavior != ACTION_UNKNOWN:
+            if not self.approach_owner_closer(person_result["map_coords"]):
+                print(f"无法进一步接近{room_name}中的主人，取消人机交互")
+                observation["interaction_success"] = False
+                self.owner_observations[observation_key] = observation
+                return observation
+
         interaction_success = self.interact_with_human(observation)
         observation["interaction_success"] = interaction_success
-        self.owner_observations[face_id] = observation
-        if interaction_success:
+        self.owner_observations[observation_key] = observation
+        if interaction_success and owner_recognized:
             self.recognized_owner_ids.add(face_id)
 
         print("--------------------------------")
@@ -744,7 +756,7 @@ class Controller:
 
     def approach_owner_closer(self, person_map):
         """
-        已确认主人身份后，根据同一个人物地图坐标再次靠近。
+        人脸和姿态识别完成后，根据同一个人物地图坐标再次靠近。
         """
         person_close_goal = self.goalpoint.find_best_goal(
             person_map,
@@ -916,6 +928,7 @@ class Controller:
 
         try:
             import switch as switch_controller
+            # self.navigator.goto("switch")
             print(
                 f"开始执行开关动作："
                 f"{'打开' if switch_action == 'open' else '关闭'}"
