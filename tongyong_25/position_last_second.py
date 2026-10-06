@@ -138,12 +138,16 @@ class SmartGoalFinder:
         while current_radius >= min_radius - 1e-9:
             rospy.loginfo(f"正在半径 {current_radius:.2f}m 处搜索...")
 
-            # 4. 在当前半径的圆上，从0度开始向两侧扩展搜索角度
-            # 角度偏移顺序: 0, +15, -15, +30, -30, ...
-            for angle_offset_multiplier in range(0, int(math.pi / self.ANGULAR_STEP) + 1):
+            # 4. 在当前半径的圆上，从0度开始向两侧扩展搜索角度。
+            # ANGULAR_STEP 的配置单位是度，而 initial_angle 和 math.pi
+            # 使用弧度，因此在参与计算前必须先转换。
+            # 角度偏移顺序: 0, +10, -10, +20, -20, ... , +180, -180。
+            angular_step_rad = math.radians(self.ANGULAR_STEP)
+            max_angle_steps = int(math.pi / angular_step_rad)
+            for angle_offset_multiplier in range(0, max_angle_steps + 1):
                 for sign in ([1, -1] if angle_offset_multiplier > 0 else [1]):
                     
-                    angle_offset = angle_offset_multiplier * self.ANGULAR_STEP * sign
+                    angle_offset = angle_offset_multiplier * angular_step_rad * sign
                     current_angle = initial_angle + angle_offset
 
                     # 计算候选点的坐标

@@ -583,67 +583,209 @@ class Detector:
 
 
 
-    def detect_known_faces(self, img_path = None):
-        # 检测已知人脸，返回识别的人脸编号，未找到则是0
-        print("正在检测已知人脸")
-        if img_path == None:
-            img_path = self.take_photo(self.device)
+    def _match_face_with_known_faces(self, face_image, source_label):
+        """计算一张候选脸与全部已注册人脸的差异。"""
+        if not self.known_faces:
+            print("没有可用于匹配的已注册人脸")
+            return None, float('inf')
 
-        face_data  = self.detect_two_faces(img_path)
-
-        self.detect_result = None
-        result = [[0,0,0],[0,0,0]]  # 第一个主人坐标，第二个客人坐标
-        result_coords = [0, 0, 0]
-        # self.close_k4a()
-
-        if len(face_data) == 0:
-            print("未识别到人脸, 跳过该进程")
-            return result  # 返回空结果列表
-        
-        unregistered_face_coords = None
-
-        # 提取新图像的特征向量
-        for items in face_data:
+        try:
             new_image_embedding = DeepFace.represent(
-                img_path=items[0]["face"],
+                img_path=face_image,
                 model_name='VGG-Face',
                 enforce_detection=False,
                 detector_backend="retinaface",
                 align=True
             )[0]["embedding"]
-            
-            
-            best_match = None
-            best_distance = float('inf')
-            # self.update_known_faces()
+        except Exception as error:
+            print(f"{source_label}特征提取失败：{error}")
+            return None, float('inf')
 
-            # 尝试匹配已知人脸
-            for person_id, known_embedding in self.known_faces.items():
-                distance = 1 - np.dot(known_embedding, new_image_embedding) / (np.linalg.norm(known_embedding) * np.linalg.norm(new_image_embedding))
-                print(f"人脸匹配差异:{distance}")
-                if distance < best_distance:
-                    best_distance = distance
-                    best_match = person_id
-            
+        best_match = None
+        best_distance = float('inf')
+        for person_id, known_embedding in self.known_faces.items():
+            distance = 1 - np.dot(
+                known_embedding,
+                new_image_embedding
+            ) / (
+                np.linalg.norm(known_embedding)
+                * np.linalg.norm(new_image_embedding)
+            )
+            print(
+                f"{source_label}人脸匹配差异："
+                f"ID={person_id}, distance={distance}"
+            )
+            if distance < best_distance:
+                best_distance = distance
+                best_match = person_id
 
-            # 检查匹配结果
-            if best_match is not None and best_distance < 0.6:
-                print(f"检测到主人：{best_match}，距离{best_distance}")
-                self.detect_result = best_match     # 将检测结果保存在 detect_result 里
-                result[0] = items[1]
-            else:
+        return best_match, best_distance
+
+    def _detect_lying_face_fallback(self, img_path, threshold=0.6):
+        """
+        常规整图识别失败后的躺姿兜底识别。
+
+        只处理画面下部的重叠区域，放大后分别尝试原方向、左右
+        旋转90度和旋转180度。正常正脸识别成功时不会调用本函数。
+        """
+        img = cv2.imread(img_path)
+        if img is None:
+            print(f"躺姿兜底识别无法读取图片：{img_path}")
+            return None, float('inf')
+
+        img_height, img_width = img.shape[:2]
+        lower_y = int(img_height * 0.55)
+        roi_ranges = [
+            ("下部中间", int(img_width * 0.20), int(img_width * 0.80)),
+            ("下部左侧", 0, int(img_width * 0.60)),
+            ("下部右侧", int(img_width * 0.40), img_width),
+        ]
+        rotations = [
+            ("原方向", None),
+            ("逆时针90度", cv2.ROTATE_90_COUNTERCLOCKWISE),
+            ("顺时针90度", cv2.ROTATE_90_CLOCKWISE),
+            ("180度", cv2.ROTATE_180),
+        ]
+
+        global_best_match = None
+        global_best_distance = float('inf')
+
+        for roi_name, x_start, x_end in roi_ranges:
+            roi = img[lower_y:img_height, x_start:x_end]
+            if roi.size == 0:
+                continue
+
+            # 缩小搜索范围后再放大，使远处的小人脸保留更多检测像素。
+            roi = cv2.resize(
+                roi,
+                None,
+                fx=2.0,
+                fy=2.0,
+                interpolation=cv2.INTER_CUBIC
+            )
+            roi_has_face = False
+
+            for rotation_name, rotation_code in rotations:
+                candidate = (
+                    roi
+                    if rotation_code is None
+                    else cv2.rotate(roi, rotation_code)
+                )
+                try:
+                    faces = DeepFace.extract_faces(
+                        candidate,
+                        detector_backend="retinaface",
+                        align=True,
+                        enforce_detection=True
+                    )
+                except ValueError:
+                    continue
+                except Exception as error:
+                    print(
+                        f"躺姿兜底识别异常：{roi_name}/"
+                        f"{rotation_name}，{error}"
+                    )
+                    continue
+
+                if not faces:
+                    continue
+
+                roi_has_face = True
+                print(
+                    f"躺姿兜底在{roi_name}/{rotation_name}"
+                    f"检测到{len(faces)}张人脸"
+                )
+                for face_index, face_info in enumerate(faces[:2]):
+                    source_label = (
+                        f"躺姿兜底[{roi_name}/{rotation_name}/"
+                        f"人脸{face_index + 1}]"
+                    )
+                    best_match, best_distance = (
+                        self._match_face_with_known_faces(
+                            face_info["face"],
+                            source_label
+                        )
+                    )
+                    if best_distance < global_best_distance:
+                        global_best_distance = best_distance
+                        global_best_match = best_match
+
+            # 一个房间最多一个人。找到包含人脸的重叠区域后，不再重复
+            # 扫描其它水平区域，避免同一张脸被多次推理。
+            if roi_has_face:
+                break
+
+        if (
+            global_best_match is not None
+            and global_best_distance < threshold
+        ):
+            print(
+                f"躺姿兜底识别到主人：{global_best_match}，"
+                f"距离{global_best_distance}"
+            )
+            return global_best_match, global_best_distance
+
+        print(
+            f"躺姿兜底未匹配到主人，"
+            f"best_distance={global_best_distance}"
+        )
+        return None, global_best_distance
+
+    def detect_known_faces(self, img_path=None):
+        # 检测已知人脸；常规识别成功时不会进入躺姿旋转兜底。
+        print("正在检测已知人脸")
+        if img_path is None:
+            img_path = self.take_photo(self.device)
+
+        face_data = self.detect_two_faces(img_path)
+        threshold = 0.6
+
+        self.detect_result = None
+        result = [[0, 0, 0], [0, 0, 0]]
+
+        if len(face_data) == 0:
+            print("常规整图未识别到人脸，开始躺姿兜底识别")
+        else:
+            for items in face_data:
+                best_match, best_distance = (
+                    self._match_face_with_known_faces(
+                        items[0]["face"],
+                        "常规识别"
+                    )
+                )
+
+                if (
+                    best_match is not None
+                    and best_distance < threshold
+                ):
+                    print(
+                        f"检测到主人：{best_match}，"
+                        f"距离{best_distance}"
+                    )
+                    self.detect_result = best_match
+                    result[0] = items[1]
+                    return result
+
                 result[1] = items[1]
-                print(f"best_distance:{best_distance}， 最短距离大于0.5，不是已知人脸")
-                # break
-                # 保存已识别人脸的图片
-                # img = cv2.imread(img_path)
+                print(
+                    f"常规识别best_distance={best_distance}，"
+                    f"未通过阈值{threshold}，开始躺姿兜底识别"
+                )
 
-                # facial_area = face["facial_area"]
-                # x, y, w, h = facial_area["x"], facial_area["y"], facial_area["w"], facial_area["h"]
-                # face_img = img[y:y+h, x:x+w]  # 裁剪人脸区域
-                # self.save_face_image(face_img, best_match)     
+        fallback_match, fallback_distance = (
+            self._detect_lying_face_fallback(
+                img_path,
+                threshold=threshold
+            )
+        )
+        if fallback_match is not None:
+            self.detect_result = fallback_match
+            print(
+                f"躺姿兜底最终确认主人：{fallback_match}，"
+                f"距离{fallback_distance}"
+            )
 
-        return result  # 返回识别的人脸编号，未找到则是0
+        return result
     
     def delete_all_faces(self):
         # 删除整个文件夹及其内容

@@ -90,11 +90,10 @@ ROOM_SCAN_TURN_TIMEOUT = 8.0
 ROOM_SCAN_SETTLE_SECONDS = 0.5
 
 # 人物识别需要保留较远距离，确保站立、坐下或躺下时脸部能够进入画面。
-OWNER_GOAL_MAX_RADIUS = 1.3
-OWNER_GOAL_MIN_RADIUS = 1.1
+OWNER_GOAL_MAX_RADIUS = 1.8
+OWNER_GOAL_MIN_RADIUS = 1.6
 
-# 完成人脸和姿态识别后，再使用同一个人物地图坐标靠近主人。
-# 该距离仅供后续人机交互使用，不影响远距离的人脸和姿态识别。
+# 确认主人身份后，使用同一个人物地图坐标再次规划更近的导航点。
 OWNER_CLOSE_MAX_RADIUS = 0.9
 OWNER_CLOSE_MIN_RADIUS = 0.8
 
@@ -481,6 +480,12 @@ class Controller:
             print(f"{person_name}已经完成识别，跳过重复交互")
             return None
 
+        # 人脸识别阶段保持较远距离；确认主人后再靠近，供后续行为
+        # 识别和人机交互使用。第二次导航仍使用最初检测到的人物坐标。
+        if not self.approach_owner_closer(person_result["map_coords"]):
+            print(f"无法进一步接近{room_name}中的主人")
+            return None
+
         self.voice.announce_owner_recognized(person_name, owner_index)
         behavior = self.recognize_behavior(face_id, person_name)
         self.voice.announce_behavior(behavior, person_name)
@@ -749,10 +754,9 @@ class Controller:
             print(f"导航到人物附近失败：{error}")
             return False
 
-
     def approach_owner_closer(self, person_map):
         """
-        人脸和姿态识别完成后，根据同一个人物地图坐标再次靠近。
+        已确认主人身份后，根据同一个人物地图坐标再次靠近。
         """
         person_close_goal = self.goalpoint.find_best_goal(
             person_map,
