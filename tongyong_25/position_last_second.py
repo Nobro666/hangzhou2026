@@ -90,16 +90,35 @@ class SmartGoalFinder:
             rospy.logwarn(f"调用 make_plan 服务异常: {e}")
             return False
 
-    def find_best_goal(self, person_pose_stamped):
+    def find_best_goal(
+        self,
+        person_pose_stamped,
+        max_radius=None,
+        min_radius=None,
+    ):
         """
         主逻辑函数：围绕人的位置搜索最佳导航目标点。
         
         Args:
             person_pose_stamped(list): 人在map坐标系下的位姿。
+            max_radius(float): 优先搜索距离；未传入时使用默认最大半径。
+            min_radius(float): 允许的最近距离；未传入时使用默认最小半径。
         
         Returns:
             PoseStamped: 找到的最佳导航目标位姿, 如果找不到则返回 None。
         """
+        if max_radius is None:
+            max_radius = self.MAX_SEARCH_RADIUS
+        if min_radius is None:
+            min_radius = self.MIN_SEARCH_RADIUS
+
+        max_radius = float(max_radius)
+        min_radius = float(min_radius)
+        if max_radius <= 0 or min_radius <= 0:
+            raise ValueError("搜索半径必须大于0")
+        if max_radius < min_radius:
+            raise ValueError("最大搜索半径不能小于最小搜索半径")
+
         # 1. 获取机器人当前位姿作为路径规划的起点
         robot_pose = self.get_robot_pose()
         if not robot_pose:
@@ -115,8 +134,8 @@ class SmartGoalFinder:
         initial_angle = math.atan2(person_point_y - robot_point.y, person_point_x - robot_point.x)
 
         # 3. 从外环向内环进行迭代搜索
-        current_radius = self.MAX_SEARCH_RADIUS
-        while current_radius >= self.MIN_SEARCH_RADIUS:
+        current_radius = max_radius
+        while current_radius >= min_radius - 1e-9:
             rospy.loginfo(f"正在半径 {current_radius:.2f}m 处搜索...")
 
             # 4. 在当前半径的圆上，从0度开始向两侧扩展搜索角度

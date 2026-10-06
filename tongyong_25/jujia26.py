@@ -13,6 +13,10 @@
 6. 寻找并清理三个垃圾
 7. 从出口自主离场
 
+优化思路：
+躺着的人可能识别不到，调整找人逻辑，直接导航到床边？
+坐着只可能出现在客厅，躺着只可能出现在卧室，是否可以简化判定逻辑
+后期需添加超时直接自主离场，确保能拿到自主离场的分数
 
 函数复杂可新增文件
 """
@@ -82,6 +86,14 @@ ROOM_SCAN_STEP_DEGREES = 60.0
 ROOM_SCAN_DETECT_TIMEOUT = 2.0
 ROOM_SCAN_TURN_TIMEOUT = 8.0
 ROOM_SCAN_SETTLE_SECONDS = 0.5
+
+# 人物识别需要保留较远距离，确保站立、坐下或躺下时脸部能够进入画面。
+OWNER_GOAL_MAX_RADIUS = 1.3
+OWNER_GOAL_MIN_RADIUS = 1.1
+
+# 垃圾抓取仍使用较近的导航距离，避免受人物识别距离影响。
+TRASH_GOAL_MAX_RADIUS = 0.6
+TRASH_GOAL_MIN_RADIUS = 0.3
 
 # Azure Kinect Body Tracking动态库及行为识别采样帧数。
 # 可通过环境变量覆盖动态库路径，便于不同机器人部署。
@@ -193,8 +205,7 @@ class Controller:
 
         if cleaned not in self.voice.owner_names:
             self.voice.owner_names.append(cleaned)
-        if (hasattr(self.voice, "parser") and
-                cleaned not in self.voice.parser.owner_names):
+        if (hasattr(self.voice, "parser") and cleaned not in self.voice.parser.owner_names):
             self.voice.parser.owner_names.append(cleaned)
 
         print(
@@ -505,7 +516,9 @@ class Controller:
             return None
 
         trash_goal = self.goalpoint.find_best_goal(
-            trash_result["map_coords"]
+            trash_result["map_coords"],
+            max_radius=TRASH_GOAL_MAX_RADIUS,
+            min_radius=TRASH_GOAL_MIN_RADIUS,
         )
         if trash_goal is None:
             print(f"没有找到{room_name}垃圾附近的安全导航点")
@@ -703,7 +716,11 @@ class Controller:
         """
         根据人物地图坐标，导航到人物附近的安全位置。
         """
-        person_goal = (self.goalpoint.find_best_goal(person_map))
+        person_goal = self.goalpoint.find_best_goal(
+            person_map,
+            max_radius=OWNER_GOAL_MAX_RADIUS,
+            min_radius=OWNER_GOAL_MIN_RADIUS,
+        )
         if person_goal is None:
             print("没有找到人物附近的安全导航点")
             return False
