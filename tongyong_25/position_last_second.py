@@ -5,6 +5,7 @@ import rospy
 import tf2_ros
 import tf_conversions
 from geometry_msgs.msg import PoseStamped, Point
+from nav_msgs.msg import OccupancyGrid
 from nav_msgs.srv import GetPlan, GetPlanRequest
 import math
 import numpy as np
@@ -37,6 +38,15 @@ class SmartGoalFinder:
         self.tf_buffer = tf2_ros.Buffer()
         self.tf_listener = tf2_ros.TransformListener(self.tf_buffer)
 
+        # 保存静态地图，用于判断相机检测到的人物是否位于已建图区域。
+        self.map_data = None
+        self.map_subscriber = rospy.Subscriber(
+            "/map",
+            OccupancyGrid,
+            self._map_callback,
+            queue_size=1,
+        )
+
         self.make_plan_service_name = "/move_base/make_plan"
         rospy.loginfo(f"等待服务 '{self.make_plan_service_name}'...")
         try:
@@ -47,6 +57,73 @@ class SmartGoalFinder:
             rospy.logerr(f"连接服务失败: {e}")
             rospy.signal_shutdown("无法连接到 make_plan 服务")
             return
+
+    def _map_callback(self, map_message):
+        """保存最新静态地图消息。"""
+        self.map_data = map_message
+
+    def is_position_in_mapped_area(self, map_coords, map_wait_timeout=1.0):
+        """
+        判断map坐标是否落在已建图栅格内。
+
+        OccupancyGrid中的-1表示未知区域；0～100均表示地图已经观测过。
+        这里不要求目标点必须是自由栅格，以免误删床上、沙发旁或靠墙的
+        场内人物。函数只负责排除地图边界外和未知区域中的候选。
+        """
+        if map_coords is None or len(map_coords) < 2:
+            return False
+
+        map_message = self.map_data
+        if map_message is None:
+            try:
+                map_message = rospy.wait_for_message(
+                    "/map",
+                    OccupancyGrid,
+                    timeout=map_wait_timeout,
+                )
+                self.map_data = map_message
+            except rospy.ROSException as error:
+                rospy.logwarn("等待/map失败，无法验证人物位置：%s", error)
+                return False
+
+        map_info = map_message.info
+        if map_info.resolution <= 0 or map_info.width <= 0 or map_info.height <= 0:
+            return False
+
+        map_x = float(map_coords[0])
+        map_y = float(map_coords[1])
+        if not math.isfinite(map_x) or not math.isfinite(map_y):
+            return False
+
+        origin = map_info.origin
+        origin_quaternion = [
+            origin.orientation.x,
+            origin.orientation.y,
+            origin.orientation.z,
+            origin.orientation.w,
+        ]
+        origin_yaw = tf_conversions.transformations.euler_from_quaternion(
+            origin_quaternion
+        )[2]
+
+        # 将map坐标转换到OccupancyGrid自身坐标系，兼容地图原点带旋转。
+        delta_x = map_x - origin.position.x
+        delta_y = map_y - origin.position.y
+        cos_yaw = math.cos(origin_yaw)
+        sin_yaw = math.sin(origin_yaw)
+        local_x = cos_yaw * delta_x + sin_yaw * delta_y
+        local_y = -sin_yaw * delta_x + cos_yaw * delta_y
+
+        grid_x = int(math.floor(local_x / map_info.resolution))
+        grid_y = int(math.floor(local_y / map_info.resolution))
+        if not (0 <= grid_x < map_info.width and 0 <= grid_y < map_info.height):
+            return False
+
+        map_index = grid_y * map_info.width + grid_x
+        if not (0 <= map_index < len(map_message.data)):
+            return False
+
+        return map_message.data[map_index] != -1
 
     def get_robot_pose(self):
         """获取机器人当前在map坐标系下的位姿"""

@@ -126,13 +126,16 @@ class PersonDetector:
         except:
             return None
 
-    def detect_person(self, camera, max_distance, timeout=5.0):
+    def detect_person(self, camera, max_distance, timeout=5.0,
+                      candidate_filter=None):
         """
         检测指定距离内是否有人，并返回人的三维坐标
         参数:
             camera: 相机对象
             max_distance: 最大检测距离(米)
             timeout: 单个方向的最长检测时间(秒)
+            candidate_filter: 可选候选过滤函数，接收相机三维坐标并返回
+                True/False。返回False时继续检查同一帧其他人物和后续帧。
         返回:
             (has_person, 3d_coords)
             has_person: 布尔值，表示是否检测到指定距离内的人
@@ -173,7 +176,23 @@ class PersonDetector:
                 z = distance
                 point_image = np.array([center_x, center_y, 1])
                 point_3d = z * np.linalg.inv(K).dot(point_image)
-                return (True, (point_3d[0], point_3d[1], point_3d[2]))
+                person_coords = (
+                    point_3d[0],
+                    point_3d[1],
+                    point_3d[2],
+                )
+
+                if candidate_filter is not None:
+                    try:
+                        if not candidate_filter(person_coords):
+                            # 当前候选不在允许区域，继续检查本帧中的
+                            # 其他人物；本帧都无效时继续读取后续帧。
+                            continue
+                    except Exception as error:
+                        print(f"人物候选位置过滤发生异常：{error}")
+                        continue
+
+                return (True, person_coords)
 
             if cv2.waitKey(10) == ord('q'):
                 break

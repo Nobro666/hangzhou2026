@@ -308,10 +308,27 @@ class ItemsDetector:
             has_target: 布尔值，表示是否检测到目标
             3d_coords: 三维坐标元组(x, y, z)，若未检测到则为(0, 0, 0)
         """
+        target_name, coords = self.detect_targets(
+            camera,
+            target_items=[target],
+            max_distance=max_distance,
+            depth=depth,
+            timeout=timeout,
+        )
+        return (target_name is not None, coords)
+
+    def detect_targets(self, camera, target_items, max_distance=None,
+                       depth=True, timeout=8):
+        """一次推理同时查找多个目标类别，并返回确认成功的类别和坐标。"""
+        target_names = set(target_items)
+        if not target_names:
+            return (None, (0.0, 0.0, 0.0))
+
         start_time = time.time()
         required_consecutive_frames = 3
         consecutive_frames = 0
         previous_box = None
+        previous_name = None
         confirmed_points = []
         while time.time() - start_time < timeout:
             if depth:
@@ -333,13 +350,14 @@ class ItemsDetector:
 
             candidates = [
                 result for result in yoloresults
-                if result.name == target
+                if result.name in target_names
                 and result.conf >= 0.5
                 and self.judge_range(result.x, width, 1.0)
             ]
             if not candidates:
                 consecutive_frames = 0
                 previous_box = None
+                previous_name = None
                 confirmed_points = []
                 continue
 
@@ -363,17 +381,23 @@ class ItemsDetector:
                     )
                     consecutive_frames = 0
                     previous_box = None
+                    previous_name = None
                     confirmed_points = []
                     continue
             else:
                 distance = 0.0
 
-            if self.boxes_are_close(previous_box, result.box, width, height):
+            if (
+                    previous_name == result.name and
+                    self.boxes_are_close(
+                        previous_box, result.box, width, height
+                    )):
                 consecutive_frames += 1
             else:
                 consecutive_frames = 1
                 confirmed_points = []
             previous_box = list(result.box)
+            previous_name = result.name
 
             z = distance
             point_image = np.array([result.x, result.y, 1])
@@ -398,18 +422,18 @@ class ItemsDetector:
             if consecutive_frames >= required_consecutive_frames:
                 stable_point = np.median(np.asarray(confirmed_points), axis=0)
                 print(
-                    f"{target}连续{required_consecutive_frames}帧确认成功，"
+                    f"{result.name}连续{required_consecutive_frames}帧确认成功，"
                     f"置信度={result.conf:.2f}，距离={distance:.2f}m"
                 )
                 return (
-                    True,
+                    result.name,
                     (stable_point[0], stable_point[1], stable_point[2]),
                 )
 
             if cv2.waitKey(10) in [ord('q'), 27]:
                 break
 
-        return (False, (0.0, 0.0, 0.0))
+        return (None, (0.0, 0.0, 0.0))
     
     def get_object_classes_sorted(self, camera, range=0.8, visualize=True):
         """

@@ -85,9 +85,9 @@ ACTION_FALL = "摔倒"
 ACTION_WAVE = "挥手"
 ACTION_UNKNOWN = "未知行为"
 
-# 房间内分段旋转搜索参数：检测 6 个方向，每次左转 60°，完成一整圈。
-ROOM_SCAN_VIEW_COUNT = 6
-ROOM_SCAN_STEP_DEGREES = 60.0
+# 房间内分段旋转搜索参数：检测 4 个方向，每次左转 90°，完成一整圈。
+ROOM_SCAN_VIEW_COUNT = 4
+ROOM_SCAN_STEP_DEGREES = 90.0
 ROOM_SCAN_DETECT_TIMEOUT = 2.0
 ROOM_SCAN_TURN_TIMEOUT = 8.0
 ROOM_SCAN_SETTLE_SECONDS = 0.5
@@ -143,7 +143,7 @@ class Controller:
         self.kinova = KinovaRobot("j2n6s300")
         print("==============机械臂初始化完成==============")
     
-        self.detector = RealSenseYolo11Detector(weights=Path("/home/zq/catkin_ws/src/cmoon/src/hangzhou2026/tongyong_25/model/yolo11m.pt"))
+        # self.detector = RealSenseYolo11Detector(weights=Path("/home/zq/catkin_ws/src/cmoon/src/hangzhou2026/tongyong_25/model/yolo11m.pt"))
         self.camera = KinectCamera()
         self.people_detector = PersonDetector()
         # 垃圾模型按需加载，避免启动主程序时占用额外显存。
@@ -165,6 +165,11 @@ class Controller:
         self.recognized_owner_ids = set()
         # 保存巡游识别结果
         self.owner_observations = {}
+        # 标记人物任务是否已经离开当前房间固定点位。没有检测到人物时
+        # 保持 False，垃圾搜索前不再向同一个房间点重复导航。
+        self.person_navigation_started = False
+        # 保存通过地图区域检查的人物坐标，避免检测返回后重复转换。
+        self.valid_person_map_coords = None
         # 保存已完成投放的垃圾数量及记录。
         self.cleaned_trash_count = 0
         self.trash_observations = []
@@ -197,9 +202,7 @@ class Controller:
         matched_name = None
         match_score = 0.0
         if hasattr(self, "voice") and hasattr(self.voice, "parser"):
-            matched_name, match_score = (
-                self.voice.parser.parse_owner_name(raw)
-            )
+            matched_name, match_score = (self.voice.parser.parse_owner_name(raw))
         if matched_name:
             print(
                 f"姓名匹配到 target_name：raw={raw} -> "
@@ -332,22 +335,15 @@ class Controller:
         max_attempts = 3
         face_attempts = 0
 
-        self.voice.say(
-            f"请主人{owner_index}站在我面前，保持静止",
-            wait=True,
-        )
+        self.voice.say(f"请主人{owner_index}站在我面前，保持静止", wait=True)
 
-        while (person_id is None and
-               face_attempts < max_attempts and
-               not rospy.is_shutdown()):
+        while (person_id is None and face_attempts < max_attempts and not rospy.is_shutdown()):
             face_attempts += 1
             self.voice.say("开始人脸注册，请看向我", wait=True)
             print(f">>> 正在进行人脸注册...（第{face_attempts}/{max_attempts}次）")
             try:
                 person_id = self.face.register_new_face(
-                    prompt_callback=lambda prompt: self.voice.say(
-                        prompt, wait=True
-                    )
+                    prompt_callback=lambda prompt: self.voice.say(prompt, wait=True)
                 )
             except Exception as error:
                 print(f"人脸注册发生异常: {error}")
@@ -396,9 +392,7 @@ class Controller:
                 free_grammar=True,
             ).strip()
             print(f"姓名识别原文: {raw_name}")
-            person_name, name_added = (
-                self.resolve_owner_name_from_target(raw_name)
-            )
+            person_name, name_added = (self.resolve_owner_name_from_target(raw_name))
         except Exception as error:
             print(f"姓名语音识别发生异常: {error}")
 
@@ -471,12 +465,15 @@ class Controller:
             if observation is not None:
                 room_results.append(observation)
 
-            # 人物任务可能让机器人移动到主人附近。开始垃圾搜索前先返回
-            # 当前房间的固定点位，避免直接在主人附近旋转和搜索垃圾。
-            print(f"人物任务结束，返回{room_name}点位后再搜索垃圾")
-            if not self.navigator.goto(room_name):
-                print(f"无法返回{room_name}点位，跳过该房间的垃圾搜索")
-                continue
+            # 只有人物任务确实尝试离开房间固定点位时才返回。没有找到
+            # 人物时机器人仍在原点，不再向同一个点重复导航。
+            if self.person_navigation_started:
+                print(f"人物任务结束，返回{room_name}点位后再搜索垃圾")
+                if not self.navigator.goto(room_name):
+                    print(f"无法返回{room_name}点位，跳过该房间的垃圾搜索")
+                    continue
+            else:
+                print(f"{room_name}未接近人物，直接开始垃圾搜索")
 
             # 无论当前房间是否找到/认出主人，都继续检查房间垃圾。
             self.trash_room(room_name)
@@ -493,11 +490,15 @@ class Controller:
 
     def people_room(self, room_name):
         """执行当前房间的人物搜索、身份/行为识别和人机交互。"""
+        self.person_navigation_started = False
         person_result = self.find_owner_in_room(room_name)
         if person_result is None:
             print(f"{room_name}中没有找到主人")
             return None
 
+        # 从这里开始可能已经偏离房间固定点；即使接近导航中途失败，
+        # 垃圾搜索前也应重新回到房间点位。
+        self.person_navigation_started = True
         if not self.approach_owner(person_result["map_coords"]):
             print(f"无法接近{room_name}中的人物")
             return None
@@ -641,39 +642,37 @@ class Controller:
                     f"{room_name}垃圾扫描方向 "
                     f"{view_index + 1}/{ROOM_SCAN_VIEW_COUNT}"
                 )
-                for target_name in TRASH_TARGET_CLASSES:
-                    has_target, coords = self.items_detector.detect(
-                        self.camera,
-                        target=target_name,
-                        max_distance=TRASH_SCAN_MAX_DISTANCE,
-                        timeout=ROOM_SCAN_DETECT_TIMEOUT,
-                    )
-                    if has_target:
-                        candidate_map_coords = self.transpoint.get_map_coords(coords)
-                        if candidate_map_coords is None:
-                            print(
-                                f"{room_name}的{target_name}候选坐标转换失败，"
-                                "继续扫描"
-                            )
-                            continue
+                target_name, coords = self.items_detector.detect_targets(
+                    self.camera,
+                    target_items=TRASH_TARGET_CLASSES,
+                    max_distance=TRASH_SCAN_MAX_DISTANCE,
+                    timeout=ROOM_SCAN_DETECT_TIMEOUT,
+                )
+                if target_name is not None:
+                    candidate_map_coords = self.transpoint.get_map_coords(coords)
+                    if candidate_map_coords is None:
+                        print(
+                            f"{room_name}的{target_name}候选坐标转换失败，"
+                            "继续扫描"
+                        )
+                        continue
 
-                        candidate_height = candidate_map_coords[2]
-                        if not (
-                            TRASH_MAP_MIN_HEIGHT <= candidate_height <=
-                            TRASH_MAP_MAX_HEIGHT
-                        ):
-                            print(
-                                f"忽略{room_name}的{target_name}候选："
-                                f"地图高度{candidate_height:.3f}m不在地面范围"
-                                f"[{TRASH_MAP_MIN_HEIGHT:.2f}, "
-                                f"{TRASH_MAP_MAX_HEIGHT:.2f}]m内"
-                            )
-                            continue
+                    candidate_height = candidate_map_coords[2]
+                    if not (
+                        TRASH_MAP_MIN_HEIGHT <= candidate_height <=
+                        TRASH_MAP_MAX_HEIGHT
+                    ):
+                        print(
+                            f"忽略{room_name}的{target_name}候选："
+                            f"地图高度{candidate_height:.3f}m不在地面范围"
+                            f"[{TRASH_MAP_MIN_HEIGHT:.2f}, "
+                            f"{TRASH_MAP_MAX_HEIGHT:.2f}]m内"
+                        )
+                        continue
 
-                        found_name = target_name
-                        camera_coords = coords
-                        map_coords = candidate_map_coords
-                        break
+                    found_name = target_name
+                    camera_coords = coords
+                    map_coords = candidate_map_coords
                 if found_name is not None:
                     break
 
@@ -732,6 +731,7 @@ class Controller:
 
         has_person = False
         camera_coords = None
+        self.valid_person_map_coords = None
         try:
             self.camera.open_camera()
 
@@ -750,6 +750,7 @@ class Controller:
                         self.camera,
                         max_distance=5.0,
                         timeout=ROOM_SCAN_DETECT_TIMEOUT,
+                        candidate_filter=self._person_candidate_in_mapped_area,
                     )
                 )
                 if has_person:
@@ -779,8 +780,8 @@ class Controller:
             return None
         print(f"{room_name}检测到人物，"f"相机坐标：{camera_coords}")
 
-        # 调用 camera_to_map.py
-        map_coords = (self.transpoint.get_map_coords(camera_coords))
+        # 候选过滤回调中已经完成坐标转换，直接复用转换结果。
+        map_coords = self.valid_person_map_coords
 
         if map_coords is None:
             print(f"{room_name}人物地图坐标转换失败")
@@ -791,6 +792,27 @@ class Controller:
             "camera_coords": camera_coords,
             "map_coords": map_coords,
         }
+
+    def _person_candidate_in_mapped_area(self, camera_coords):
+        """只接受地图边界内且不属于未知栅格的人物候选。"""
+        map_coords = self.transpoint.get_map_coords(camera_coords)
+        if map_coords is None:
+            print(f"忽略人物候选：相机坐标{camera_coords}转换失败")
+            return False
+
+        if not self.goalpoint.is_position_in_mapped_area(map_coords):
+            print(
+                "忽略场外人物候选："
+                f"相机坐标={camera_coords}，地图坐标={map_coords}"
+            )
+            return False
+
+        self.valid_person_map_coords = map_coords
+        print(
+            "人物候选位于已建图区域："
+            f"相机坐标={camera_coords}，地图坐标={map_coords}"
+        )
+        return True
     
 
     def approach_owner(self, person_map):
@@ -913,10 +935,7 @@ class Controller:
                 POSE_FALLEN: ACTION_FALL,
                 POSE_WAVING: ACTION_WAVE,
             }
-            behavior = behavior_mapping.get(
-                detected_behavior,
-                ACTION_UNKNOWN,
-            )
+            behavior = behavior_mapping.get(detected_behavior, ACTION_UNKNOWN)
             if detected_behavior == POSE_STANDING:
                 print("检测到主人站立，但站立不属于当前任务行为")
             elif detected_behavior is None:
