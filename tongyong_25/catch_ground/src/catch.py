@@ -579,7 +579,9 @@ class KinovaRobot:
         self.arm_run(pose_target=position_down)
         # rospy.timer.sleep(3)
         
-        detector = RealSenseYolo11DetectorDesk(weights=Path("/home/zq/catkin_ws/src/cmoon/src/shijiazhuang_2025/tongyong_25/model/bestfxz.pt"))
+        detector = RealSenseYolo11DetectorDesk(
+            weights=Path(__file__).resolve().parents[4] / "models" / "bestfxz.pt"
+        )
         result = detector.detect_targets(target_items = target)
         
         if result:
@@ -640,7 +642,9 @@ class KinovaRobot:
         self.arm_run(pose_target=position_down)
         # rospy.timer.sleep(3)
         
-        detector = RealSenseYolo11DetectorDesk(weights=Path("/home/zq/catkin_ws/src/cmoon/src/shijiazhuang_2025/tongyong_25/model/level_best.pt"))
+        detector = RealSenseYolo11DetectorDesk(
+            weights=Path(__file__).resolve().parents[4] / "models" / "level_best.pt"
+        )
         result = detector.detect_targets(target_items = target)
         
         if result:

@@ -4,34 +4,27 @@
 """2026 home robot: navigation and collection program."""
 
 
-from summer_tts_speaker import SummerTTSSpeaker
-from speech_2026 import CompetitionVoiceService
-from face_to_person import facetoPerson
-from goal_calculator import calculate_facing_goal
-import sys
-sys.path.append(r"/home/zq/catkin_ws/src/cmoon/src")
-import rospy
-import os
-import re
-import cv2
-from navigator import Navigator  # 导航模块
-from pathlib import Path
-from base_controller import Base  # 底盘运动模块
-from std_msgs.msg import String  # std_msgs中包含消息类型string，发布的消息类型为String，从String.data中可获得信息，
-import datetime
 import argparse
-import time
-from catch_ground.src.catch import KinovaRobot
-from catch_ground.src.realsense_yolo11 import RealSenseYolo11Detector
-from detect_people import KinectCamera, PersonDetector
-# from catch_ground.src.detector_items import ItemsDetector
-from catch_ground.src.detector_items_c import ItemsDetector
-from camera_to_map import CoordinateConverter
-from position_last_second import SmartGoalFinder
-# from face_detect import Detector #单人版
-from face_detect_tongyong import Detector #双人版
-import subprocess
+import sys
+from pathlib import Path
+
+
+PROJECT_DIR = Path(__file__).resolve().parent
+CMOON_SOURCE_DIR = str(PROJECT_DIR.parents[1])
+if CMOON_SOURCE_DIR not in sys.path:
+    sys.path.append(CMOON_SOURCE_DIR)
+
+import rospy
 from geometry_msgs.msg import PoseWithCovarianceStamped
+
+from catch_ground.src.catch import KinovaRobot
+
+CATCH_SOURCE_DIR = str(PROJECT_DIR / "catch_ground" / "src")
+if CATCH_SOURCE_DIR not in sys.path:
+    sys.path.append(CATCH_SOURCE_DIR)
+
+from catch_ty import KinovaRobotGroud
+from navigator import Navigator
 
 
 LOCATION = {
@@ -145,6 +138,6 @@ if __name__ == "__main__":
     parser.parse_args()
 
     try:
-        Controller("jujia26")
+        Controller("jushen26")
     except rospy.ROSInterruptException:
         pass
