@@ -43,24 +43,16 @@ import re
 import time
 import wave
 from dataclasses import dataclass
-from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+import rospy
+
+import rospy
 
 try:
     import pyaudio
 except Exception:  # pragma: no cover - 机器人现场环境才会有麦克风依赖
     pyaudio = None
-
-try:
-    import rospy
-except Exception:  # 允许离线解析测试在非 ROS 环境运行
-    class _DummyRospy:
-        @staticmethod
-        def is_shutdown():
-            return False
-    rospy = _DummyRospy()
-
 
 
 # =========================
@@ -160,30 +152,6 @@ def normalize_text(text: Optional[str]) -> str:
     for filler in ("那个", "就是", "嗯", "啊", "呀", "吧", "请", "帮我", "麻烦你"):
         text = text.replace(filler, "")
     return text
-
-
-
-def text_to_pinyin_key(text: Optional[str]) -> str:
-    """
-    将中文文本转成无声调拼音串，用于姓名容错匹配。
-    例如：王五 -> wangwu，晚雾 -> wanwu。
-    若现场未安装 pypinyin，则返回 normalize_text(text) 作为兜底，不影响原有流程。
-    """
-    norm = normalize_text(text)
-    if not norm:
-        return ""
-    try:
-        from pypinyin import lazy_pinyin
-        return "".join(lazy_pinyin(norm, errors="ignore"))
-    except Exception:
-        return norm
-
-
-def similarity_ratio(a: str, b: str) -> float:
-    """返回 0~1 的字符串相似度，用于拼音/文本兜底匹配。"""
-    if not a or not b:
-        return 0.0
-    return SequenceMatcher(None, a, b).ratio()
 
 
 def unique_keep_order(words: Iterable[str]) -> List[str]:
@@ -416,28 +384,15 @@ class CompetitionVoiceParser:
         self.switch_objects = list(switch_objects or DEFAULT_SWITCH_OBJECTS)
 
     def parse_owner_name(self, text: str) -> Tuple[Optional[str], float]:
-        """
-        匹配主人姓名。
-
-        优先级：
-        1. 识别文本直接包含候选姓名；
-        2. 字符重叠匹配；
-        3. 拼音容错匹配，例如“晚雾”(wanwu) 可匹配“王五”(wangwu)。
-
-        拼音阈值可现场调整：
-            export ROBO_NAME_PINYIN_MIN_SCORE=0.55
-        阈值越高越保守，越低越容易把环境误识别文本匹配成某个姓名。
-        """
+        """匹配主人姓名。后续只需修改 DEFAULT_OWNER_NAMES 或初始化传入 owner_names。"""
         norm = normalize_text(text)
         if not norm:
             return None, 0.0
-
-        # 1) 直接包含优先，保证“张三/李四/王五”等标准姓名不被误改。
+        # 直接包含优先。
         for name in self.owner_names:
             if name and name in norm:
                 return name, 1.0
-
-        # 2) 简单字符重叠兜底。
+        # 简单字符重叠兜底，避免现场没有 pypinyin/fuzzywuzzy 时不可用。
         best_name, best_score = None, 0.0
         for name in self.owner_names:
             if not name:
@@ -448,25 +403,7 @@ class CompetitionVoiceParser:
                 best_name, best_score = name, score
         if best_score >= 0.67:
             return best_name, best_score
-
-        # 3) 拼音容错：解决“王五 -> 晚雾”“张王 -> 找我啊”等同/近音误识别。
-        raw_py = text_to_pinyin_key(norm)
-        best_py_name, best_py_score = None, 0.0
-        for name in self.owner_names:
-            name_py = text_to_pinyin_key(name)
-            score = similarity_ratio(raw_py, name_py)
-            if score > best_py_score:
-                best_py_name, best_py_score = name, score
-
-        min_score = float(os.environ.get("ROBO_NAME_PINYIN_MIN_SCORE", "0.55"))
-        if best_py_name and best_py_score >= min_score:
-            print(
-                f"[姓名拼音匹配] 识别文本={text} 拼音={raw_py} -> "
-                f"{best_py_name} 分数={best_py_score:.2f} 阈值={min_score:.2f}"
-            )
-            return best_py_name, best_py_score
-
-        return None, max(best_score, best_py_score)
+        return None, best_score
 
     def parse_switch_command(self, text: str) -> SwitchCommand:
         """解析主人对开关/电器的需求。"""

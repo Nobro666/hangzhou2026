@@ -143,13 +143,23 @@ class Controller:
         将姓名识别原文约束到 target_name。
 
         规则：
-        1. 如果识别文本中包含 target_name 里的姓名，使用 target_name 中的标准写法；
-        2. 如果不在 target_name，认为这是现场新增主人姓名，追加到 target_name，
-           并同步到 CompetitionVoiceService 的姓名列表，后续保持同一标准写法。
+        1. 先调用 CompetitionVoiceService.parser.parse_owner_name，内部包含：
+           直接文本匹配、字符重叠匹配、拼音相似度匹配；
+        2. 如果能匹配到 target_name 中已有姓名，返回标准姓名；
+        3. 如果仍无法匹配，认为是现场新增姓名，追加到 target_name，
+           并同步到 CompetitionVoiceService，后续保持同一标准写法。
         """
         raw = (raw_text or "").strip()
         if not raw:
             return "", False
+
+        matched_name = None
+        score = 0.0
+        if hasattr(self, "voice") and hasattr(self.voice, "parser"):
+            matched_name, score = self.voice.parser.parse_owner_name(raw)
+        if matched_name:
+            print(f"姓名匹配到 target_name：raw={raw} -> {matched_name}，score={score:.2f}")
+            return matched_name, False
 
         cleaned = re.sub(r"[^\w\u4e00-\u9fff]", "", raw)
         for prefix in ("我叫", "我的名字叫", "名字叫", "姓名是", "我是", "叫"):
@@ -160,12 +170,7 @@ class Controller:
         if not cleaned:
             cleaned = raw
 
-        for name in target_name:
-            if name and (name in cleaned or cleaned in name):
-                return name, False
-
         target_name.append(cleaned)
-        # 同步给语音服务，避免后续使用姓名解析接口时仍不知道新增姓名。
         if hasattr(self, "voice"):
             if cleaned not in self.voice.owner_names:
                 self.voice.owner_names.append(cleaned)
@@ -173,8 +178,7 @@ class Controller:
                 self.voice.parser.owner_names.append(cleaned)
         print(f"新增主人姓名到 target_name：{cleaned}；当前 target_name={target_name}")
         return cleaned, True
-    
-   
+
     def grip_object_coor(self,list):
         """
         返回传入相机坐标 返回目标点
