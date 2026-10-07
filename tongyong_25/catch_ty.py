@@ -473,7 +473,7 @@ class KinovaRobotGroud:
         print("-----到达检测位-----")
         self.arm_run(pose_target=position_down)
 
-    def catch_ground(self, weights_path=None):
+    def catch_ground(self, weights_path=None, target_items=None):
         # 误差
         x_down = 0.633305
         y_down = -0.195270
@@ -488,9 +488,11 @@ class KinovaRobotGroud:
         rospy.timer.sleep(3)
         if weights_path is None:
             weights_path = "/home/zq/catkin_ws/src/cmoon/src/hangzhou2026/tongyong_25/model/best5.pt"
+        if target_items is None:
+            target_items = ["empty_bottle", "paper_ball"]
         detector = RealSenseYolo11Detector(weights=Path(weights_path))
         print("1")
-        result = detector.detect_targets(target_items = ["empty_bottle"])
+        result = detector.detect_targets(target_items=list(target_items))
         print("2")
         if result:
             print("------识别成功------")
@@ -527,7 +529,7 @@ class KinovaRobotGroud:
             self.finger_run(finger_target=[75,75,75])
             self.finger_run(finger_target=[100,100,100])
             self.arm_run(pose_target=home_position)
-            return True
+            return result
 
         print("————未检测到可抓取的垃圾————")
         self.arm_run(pose_target=home_position)

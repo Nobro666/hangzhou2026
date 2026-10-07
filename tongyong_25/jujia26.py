@@ -111,7 +111,7 @@ BEHAVIOR_RECOGNIZE_FRAMES = 20
 
 # 垃圾粗定位类别。应与Kinect检测模型和catch_ty.py中的RealSense
 # 垃圾模型类别保持一致。
-TRASH_TARGET_CLASSES = ["empty_bottle"]
+TRASH_TARGET_CLASSES = ["empty_bottle", "paper_ball"]
 TRASH_TARGET_COUNT = 3
 TRASH_SCAN_MAX_DISTANCE = 5.0
 TRASH_MODEL_PATH = os.environ.get(
@@ -534,8 +534,10 @@ class Controller:
         
         trash_result = self.find_trash_in_room(room_name)
         if trash_result is None:
-            print(f"{room_name}中没有找到垃圾")
-            return None
+            print(
+                f"{room_name}中K4A没有找到垃圾，改用RealSense检查近处地面"
+            )
+            return self.handle_realsense_trash_fallback(room_name)
 
         trash_goal = self.goalpoint.find_best_goal(
             trash_result["map_coords"],
@@ -559,6 +561,7 @@ class Controller:
             grasp_result = KinovaRobotGroud.catch_ground(
                 self.kinova,
                 weights_path=TRASH_MODEL_PATH,
+                target_items=[trash_result["trash_name"]],
             )
             if not grasp_result:
                 print(f"{room_name}垃圾抓取失败")
@@ -581,6 +584,67 @@ class Controller:
         self.trash_observations.append(trash_result)
         print(
             f"{room_name}垃圾已投放，"
+            f"完成数量={self.cleaned_trash_count}/{TRASH_TARGET_COUNT}"
+        )
+        return trash_result
+
+
+    def handle_realsense_trash_fallback(self, room_name):
+        """K4A未发现垃圾时，用RealSense检查近处地面并直接抓取。"""
+        try:
+            # catch_ground会先把机械臂移动到地面检测位，再启动RealSense；
+            # 无论是否识别成功，机械臂都会在函数结束前回到原位。
+            from catch_ty import KinovaRobotGroud
+
+            grasp_result = KinovaRobotGroud.catch_ground(
+                self.kinova,
+                weights_path=TRASH_MODEL_PATH,
+                target_items=TRASH_TARGET_CLASSES,
+            )
+            if not grasp_result:
+                print(f"{room_name}中RealSense也没有发现可抓取垃圾")
+                return None
+
+            trash_name = getattr(
+                grasp_result,
+                "name",
+                "realsense_detected_trash",
+            )
+            camera_coords = (
+                getattr(grasp_result, "x", None),
+                getattr(grasp_result, "y", None),
+                getattr(grasp_result, "z", None),
+            )
+            print(
+                f"{room_name}中RealSense发现并抓取垃圾：{trash_name}，"
+                f"相机坐标={camera_coords}"
+            )
+
+            if not self.navigator.goto("trash_can"):
+                print("RealSense已完成垃圾抓取，但无法到达垃圾桶")
+                return None
+
+            put_result = KinovaRobotGroud.put_rubbish(self.kinova)
+            if not put_result:
+                print("到达垃圾桶，但RealSense兜底垃圾投放失败")
+                return None
+        except (Exception, SystemExit) as error:
+            print(f"RealSense兜底检测、抓取或投放发生异常：{error}")
+            return None
+
+        trash_result = {
+            "room_name": room_name,
+            "trash_name": trash_name,
+            "camera_coords": camera_coords,
+            # RealSense兜底用于机械臂近距离直接抓取，不生成地图坐标。
+            "map_coords": None,
+            "detection_source": "realsense",
+            "put_success": True,
+        }
+        self.cleaned_trash_count += 1
+        self.trash_observations.append(trash_result)
+        print(
+            f"{room_name}RealSense兜底垃圾已投放，"
             f"完成数量={self.cleaned_trash_count}/{TRASH_TARGET_COUNT}"
         )
         return trash_result
