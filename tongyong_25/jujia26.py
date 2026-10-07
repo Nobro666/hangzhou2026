@@ -168,6 +168,8 @@ class Controller:
         # 标记人物任务是否已经离开当前房间固定点位。没有检测到人物时
         # 保持 False，垃圾搜索前不再向同一个房间点重复导航。
         self.person_navigation_started = False
+        # 保存通过地图区域检查的人物坐标，避免检测返回后重复转换。
+        self.valid_person_map_coords = None
         # 保存已完成投放的垃圾数量及记录。
         self.cleaned_trash_count = 0
         self.trash_observations = []
@@ -200,9 +202,7 @@ class Controller:
         matched_name = None
         match_score = 0.0
         if hasattr(self, "voice") and hasattr(self.voice, "parser"):
-            matched_name, match_score = (
-                self.voice.parser.parse_owner_name(raw)
-            )
+            matched_name, match_score = (self.voice.parser.parse_owner_name(raw))
         if matched_name:
             print(
                 f"姓名匹配到 target_name：raw={raw} -> "
@@ -335,22 +335,15 @@ class Controller:
         max_attempts = 3
         face_attempts = 0
 
-        self.voice.say(
-            f"请主人{owner_index}站在我面前，保持静止",
-            wait=True,
-        )
+        self.voice.say(f"请主人{owner_index}站在我面前，保持静止", wait=True)
 
-        while (person_id is None and
-               face_attempts < max_attempts and
-               not rospy.is_shutdown()):
+        while (person_id is None and face_attempts < max_attempts and not rospy.is_shutdown()):
             face_attempts += 1
             self.voice.say("开始人脸注册，请看向我", wait=True)
             print(f">>> 正在进行人脸注册...（第{face_attempts}/{max_attempts}次）")
             try:
                 person_id = self.face.register_new_face(
-                    prompt_callback=lambda prompt: self.voice.say(
-                        prompt, wait=True
-                    )
+                    prompt_callback=lambda prompt: self.voice.say(prompt, wait=True)
                 )
             except Exception as error:
                 print(f"人脸注册发生异常: {error}")
@@ -399,9 +392,7 @@ class Controller:
                 free_grammar=True,
             ).strip()
             print(f"姓名识别原文: {raw_name}")
-            person_name, name_added = (
-                self.resolve_owner_name_from_target(raw_name)
-            )
+            person_name, name_added = (self.resolve_owner_name_from_target(raw_name))
         except Exception as error:
             print(f"姓名语音识别发生异常: {error}")
 
@@ -740,6 +731,7 @@ class Controller:
 
         has_person = False
         camera_coords = None
+        self.valid_person_map_coords = None
         try:
             self.camera.open_camera()
 
@@ -758,6 +750,7 @@ class Controller:
                         self.camera,
                         max_distance=5.0,
                         timeout=ROOM_SCAN_DETECT_TIMEOUT,
+                        candidate_filter=self._person_candidate_in_mapped_area,
                     )
                 )
                 if has_person:
@@ -787,8 +780,8 @@ class Controller:
             return None
         print(f"{room_name}检测到人物，"f"相机坐标：{camera_coords}")
 
-        # 调用 camera_to_map.py
-        map_coords = (self.transpoint.get_map_coords(camera_coords))
+        # 候选过滤回调中已经完成坐标转换，直接复用转换结果。
+        map_coords = self.valid_person_map_coords
 
         if map_coords is None:
             print(f"{room_name}人物地图坐标转换失败")
@@ -799,6 +792,27 @@ class Controller:
             "camera_coords": camera_coords,
             "map_coords": map_coords,
         }
+
+    def _person_candidate_in_mapped_area(self, camera_coords):
+        """只接受地图边界内且不属于未知栅格的人物候选。"""
+        map_coords = self.transpoint.get_map_coords(camera_coords)
+        if map_coords is None:
+            print(f"忽略人物候选：相机坐标{camera_coords}转换失败")
+            return False
+
+        if not self.goalpoint.is_position_in_mapped_area(map_coords):
+            print(
+                "忽略场外人物候选："
+                f"相机坐标={camera_coords}，地图坐标={map_coords}"
+            )
+            return False
+
+        self.valid_person_map_coords = map_coords
+        print(
+            "人物候选位于已建图区域："
+            f"相机坐标={camera_coords}，地图坐标={map_coords}"
+        )
+        return True
     
 
     def approach_owner(self, person_map):
