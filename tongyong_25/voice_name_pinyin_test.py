@@ -3,27 +3,25 @@
 """
 voice_name_pinyin_test.py
 
-用于单独测试“主人姓名识别 -> 拼音容错 -> target_name 列表匹配”的脚本。
+实机测试“播报 -> 等待 done -> 录音 -> Vosk 转文字 -> 姓名拼音匹配 -> 播报匹配结果”。
+默认运行 5 轮真实测试。
 
-测试目标：
-1. 离线测试：不需要 ROS/TTS/麦克风，只测试 parse_owner_name() 是否能把
-   “晚雾”匹配到“王五”、“找我啊”尽量匹配到候选姓名。
-2. 实机测试：播报“你叫什么名字”，等待 /summer_tts_done 后录音识别，
-   再把识别文本与 target_name 的姓名做拼音相似度匹配，最后播报标准姓名。
+默认运行：
+    python3 voice_name_pinyin_test.py
 
-运行示例：
-    # 只做离线拼音匹配测试
-    python3 voice_name_pinyin_test.py --offline
-
-    # 使用默认姓名列表做实机测试
-    python3 voice_name_pinyin_test.py --live
-
-    # 指定姓名列表与阈值
-    python3 voice_name_pinyin_test.py --live --names 张三 李四 王五 --score 0.55 --rms 500
+常用参数：
+    python3 voice_name_pinyin_test.py --names 张三 李四 王五 --rounds 5 --score 0.55 --rms 500
+    python3 voice_name_pinyin_test.py --offline-only   # 只做离线拼音匹配样例，不启动 ROS/麦克风
 
 依赖：
     pip3 install pypinyin
-否则脚本仍可运行，但拼音匹配会退化为普通文本相似度，效果会差很多。
+
+运行前要求：
+1. roscore / ROS_MASTER_URI / ROS_IP 正确；
+2. summer_tts_node_with_done 已启动，并订阅 /summer_tts_topic；
+3. C++ TTS 节点会在播报完成后发布 /summer_tts_done；
+4. Vosk 中文模型路径正确；
+5. 麦克风可用。
 """
 
 from __future__ import annotations
@@ -31,48 +29,60 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import os
+from pathlib import Path
 from typing import List, Tuple
 
-from speech_2026 import CompetitionVoiceParser, CompetitionVoiceService, text_to_pinyin_key
+from speech_2026 import (
+    CompetitionVoiceParser,
+    CompetitionVoiceService,
+    DEFAULT_MODEL_PATHS,
+    pyaudio,
+    text_to_pinyin_key,
+)
 from summer_tts_speaker import SummerTTSSpeaker
 
 
-def check_pypinyin():
-    """提示 pypinyin 是否可用。"""
+def check_pypinyin() -> bool:
     ok = importlib.util.find_spec("pypinyin") is not None
     if ok:
-        print("[依赖检查] pypinyin 已安装：拼音匹配可用")
+        print("[环境检查] pypinyin 已安装：拼音匹配可用")
     else:
-        print("[依赖检查] 未检测到 pypinyin：请在机器人上执行 pip3 install pypinyin")
-        print("[依赖检查] 当前会退化为文本相似度，无法真正验证中文转拼音效果")
+        print("[环境检查][警告] 未检测到 pypinyin：请执行 pip3 install pypinyin")
+        print("[环境检查][警告] 未安装时不会崩溃，但中文转拼音效果会退化")
+    return ok
+
+
+def check_vosk_model() -> bool:
+    model_path = os.environ.get("VOSK_ZH_MODEL", DEFAULT_MODEL_PATHS["zh"])
+    ok = Path(model_path).exists()
+    if ok:
+        print(f"[环境检查] Vosk 中文模型存在：{model_path}")
+    else:
+        print(f"[环境检查][错误] Vosk 中文模型路径不存在：{model_path}")
+        print("[环境检查][提示] 请设置 export VOSK_ZH_MODEL=/你的/vosk-model-small-cn-0.22")
+    return ok
+
+
+def check_pyaudio() -> bool:
+    ok = pyaudio is not None
+    if ok:
+        print("[环境检查] pyaudio 可用：可以调用麦克风录音")
+    else:
+        print("[环境检查][错误] pyaudio 不可用：无法录音")
     return ok
 
 
 def resolve_by_parser(parser: CompetitionVoiceParser, raw_text: str) -> Tuple[str, float]:
-    """调用 speech_2026 中的统一姓名解析逻辑。"""
     name, score = parser.parse_owner_name(raw_text)
     return name or "", score
 
 
-def run_offline_tests(names: List[str]):
-    """离线测试若干常见误识别文本。"""
-    print("\n========== 离线姓名拼音匹配测试 ==========")
+def run_offline_samples(names: List[str]):
+    """环境检查后的离线样例，便于先看拼音匹配效果。"""
+    print("\n========== 离线拼音匹配样例 ==========")
     print("候选姓名 target_name:", names)
     parser = CompetitionVoiceParser(owner_names=names)
-
-    samples = [
-        "张三",
-        "我叫张三",
-        "李四",
-        "王五",
-        "晚雾",      # 期望接近 王五 / wangwu
-        "王武",      # 期望接近 王五 / wangwu
-        "找我啊",    # 可能接近 张王/张?，用于观察分数
-        "张王",
-        "里斯",      # 期望接近 李四 / lisi
-        "环境噪声",
-    ]
-
+    samples = ["张三", "我叫张三", "李四", "王五", "晚雾", "王武", "找我啊", "张王", "里斯", "环境噪声"]
     for raw in samples:
         matched, score = resolve_by_parser(parser, raw)
         print(
@@ -80,51 +90,65 @@ def run_offline_tests(names: List[str]):
             f"=> matched={matched or '未匹配':<6} score={score:.2f}"
         )
 
-    print("\n说明：")
-    print("- 如果 raw='晚雾' 能匹配到 '王五'，说明拼音容错生效。")
-    print("- 如果环境噪声也匹配到姓名，说明 ROBO_NAME_PINYIN_MIN_SCORE 过低，需要调高。")
 
-
-def run_live_test(names: List[str], duration: float, retries: int):
-    """实机测试：播报问题，录音识别，再做姓名拼音匹配并播报结果。"""
-    print("\n========== 实机姓名识别 + 拼音匹配测试 ==========")
+def run_live_rounds(names: List[str], duration: float, rounds: int):
+    """真实播报和录音测试，循环 rounds 轮。"""
+    print("\n========== 实机姓名播报 + 录音 + 拼音匹配测试 ==========")
     print("候选姓名 target_name:", names)
+    print(f"测试轮数：{rounds}，每轮录音 {duration:.1f} 秒")
 
     import rospy
 
-    rospy.init_node("voice_name_pinyin_test", anonymous=True)
+    if not rospy.core.is_initialized():
+        rospy.init_node("voice_name_pinyin_test", anonymous=True)
+
     speaker = SummerTTSSpeaker()
+    if not speaker.is_connected():
+        print("[环境检查][错误] /summer_tts_topic 当前没有订阅者，无法真实播报。")
+        print("请先启动 summer_tts_node_with_done，并确认 rostopic info /summer_tts_topic 有 subscriber。")
+        return
+    print("[环境检查] 已连接到 /summer_tts_topic 订阅者")
+
     voice = CompetitionVoiceService(owner_names=names, speaker=speaker)
 
-    raw_text = voice.ask_raw_text(
-        prompt="你叫什么名字？",
-        duration=duration,
-        retries=retries,
-        repeat=False,
-        free_grammar=True,
-    ).strip()
+    voice.say("姓名拼音匹配测试开始", wait=True)
+    for idx in range(1, rounds + 1):
+        if rospy.is_shutdown():
+            break
 
-    print(f"[实机识别原文] {raw_text}")
-    print(f"[实机识别拼音] {text_to_pinyin_key(raw_text)}")
+        print(f"\n========== 第 {idx}/{rounds} 轮 ==========")
+        raw_text = voice.ask_raw_text(
+            prompt=f"第{idx}轮，请说出你的名字",
+            duration=duration,
+            retries=1,
+            repeat=False,
+            free_grammar=True,
+        ).strip()
 
-    matched_name, score = voice.parser.parse_owner_name(raw_text)
-    if matched_name:
-        print(f"[姓名匹配结果] {matched_name}, score={score:.2f}")
-        voice.say(f"好的，{matched_name}", wait=True)
-    else:
-        print(f"[姓名匹配结果] 未匹配到候选姓名，score={score:.2f}")
-        voice.say("没有匹配到候选姓名", wait=True)
+        print(f"[第{idx}轮] 识别原文：{raw_text}")
+        print(f"[第{idx}轮] 原文拼音：{text_to_pinyin_key(raw_text)}")
+
+        matched_name, score = voice.parser.parse_owner_name(raw_text)
+        if matched_name:
+            print(f"[第{idx}轮] 匹配结果：{matched_name}, score={score:.2f}")
+            voice.say(f"匹配结果，{matched_name}", wait=True)
+        else:
+            print(f"[第{idx}轮] 未匹配到候选姓名，score={score:.2f}")
+            voice.say("没有匹配到候选姓名", wait=True)
+
+    voice.say("姓名拼音匹配测试结束", wait=True)
+    print("\n测试结束。")
 
 
 def main():
-    parser = argparse.ArgumentParser(description="测试姓名拼音容错匹配")
+    parser = argparse.ArgumentParser(description="循环测试姓名拼音容错匹配")
     parser.add_argument("--names", nargs="+", default=["张三", "李四", "王五"], help="候选主人姓名列表")
-    parser.add_argument("--offline", action="store_true", help="只运行离线样例测试")
-    parser.add_argument("--live", action="store_true", help="运行实机播报、录音、识别测试")
-    parser.add_argument("--duration", type=float, default=5.0, help="实机录音时长")
-    parser.add_argument("--retries", type=int, default=3, help="实机重试次数")
+    parser.add_argument("--rounds", type=int, default=5, help="实机测试轮数，默认 5")
+    parser.add_argument("--duration", type=float, default=5.0, help="每轮录音时长")
     parser.add_argument("--score", type=float, default=None, help="拼音匹配阈值，对应 ROBO_NAME_PINYIN_MIN_SCORE")
     parser.add_argument("--rms", type=int, default=None, help="录音能量阈值，对应 ROBO_MIN_RMS")
+    parser.add_argument("--offline-only", action="store_true", help="只做离线样例，不启动 ROS/TTS/麦克风")
+    parser.add_argument("--skip-offline", action="store_true", help="跳过离线样例，直接实机测试")
     args = parser.parse_args()
 
     if args.score is not None:
@@ -132,16 +156,24 @@ def main():
     if args.rms is not None:
         os.environ["ROBO_MIN_RMS"] = str(args.rms)
 
+    print("========== 环境检查 ==========")
     print("ROBO_NAME_PINYIN_MIN_SCORE=", os.environ.get("ROBO_NAME_PINYIN_MIN_SCORE", "0.55 默认"))
     print("ROBO_MIN_RMS=", os.environ.get("ROBO_MIN_RMS", "300 默认"))
     check_pypinyin()
 
-    # 默认至少跑离线测试，避免用户忘记参数后什么都不做。
-    if args.offline or not args.live:
-        run_offline_tests(args.names)
+    if not args.skip_offline:
+        run_offline_samples(args.names)
 
-    if args.live:
-        run_live_test(args.names, duration=args.duration, retries=args.retries)
+    if args.offline_only:
+        return
+
+    model_ok = check_vosk_model()
+    audio_ok = check_pyaudio()
+    if not model_ok or not audio_ok:
+        print("[环境检查][错误] 模型或麦克风环境不满足，停止实机测试。")
+        return
+
+    run_live_rounds(args.names, duration=args.duration, rounds=args.rounds)
 
 
 if __name__ == "__main__":

@@ -182,13 +182,27 @@ class Controller:
         """
         将姓名识别原文约束到 target_name。
 
-        如果识别文本包含已有姓名，返回 target_name 中的标准写法；
-        如果没有匹配，则将清理后的识别文本作为现场新增姓名，
-        同步加入 target_name 和语音服务的姓名列表。
+        先调用 CompetitionVoiceService 中的统一姓名解析器，依次执行
+        直接文本、字符重叠和拼音相似度匹配。匹配成功时返回
+        target_name 中的标准姓名；仍未匹配时，才将清理后的识别文本
+        作为现场新增姓名，并同步加入语音服务的姓名列表。
         """
         raw = (raw_text or "").strip()
         if not raw:
             return "", False
+
+        matched_name = None
+        match_score = 0.0
+        if hasattr(self, "voice") and hasattr(self.voice, "parser"):
+            matched_name, match_score = (
+                self.voice.parser.parse_owner_name(raw)
+            )
+        if matched_name:
+            print(
+                f"姓名匹配到 target_name：raw={raw} -> "
+                f"{matched_name}，score={match_score:.2f}"
+            )
+            return matched_name, False
 
         cleaned = re.sub(r"[^\w\u4e00-\u9fff]", "", raw)
         for prefix in (
