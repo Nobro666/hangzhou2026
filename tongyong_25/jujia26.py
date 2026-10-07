@@ -114,6 +114,10 @@ BEHAVIOR_RECOGNIZE_FRAMES = 20
 TRASH_TARGET_CLASSES = ["empty_bottle", "paper_ball"]
 TRASH_TARGET_COUNT = 3
 TRASH_SCAN_MAX_DISTANCE = 5.0
+# 地图坐标系中地面垃圾允许的高度范围。超出范围的候选继续扫描，
+# 不再生成导航目标；用于过滤桌椅、人体或背景上的误检。
+TRASH_MAP_MIN_HEIGHT = -0.15
+TRASH_MAP_MAX_HEIGHT = 0.45
 TRASH_MODEL_PATH = os.environ.get(
     "TRASH_MODEL_PATH",
     "/home/zq/catkin_ws/src/cmoon/src/hangzhou2026/tongyong_25/model/best5.pt",
@@ -443,6 +447,13 @@ class Controller:
             if observation is not None:
                 room_results.append(observation)
 
+            # 人物任务可能让机器人移动到主人附近。开始垃圾搜索前先返回
+            # 当前房间的固定点位，避免直接在主人附近旋转和搜索垃圾。
+            print(f"人物任务结束，返回{room_name}点位后再搜索垃圾")
+            if not self.navigator.goto(room_name):
+                print(f"无法返回{room_name}点位，跳过该房间的垃圾搜索")
+                continue
+
             # 无论当前房间是否找到/认出主人，都继续检查房间垃圾。
             self.trash_room(room_name)
 
@@ -654,6 +665,7 @@ class Controller:
         """使用头顶Kinect分段扫描垃圾并返回相机/地图坐标。"""
         found_name = None
         camera_coords = None
+        map_coords = None
         try:
             if self.items_detector is None:
                 self.items_detector = ItemsDetector(
@@ -676,8 +688,30 @@ class Controller:
                         timeout=ROOM_SCAN_DETECT_TIMEOUT,
                     )
                     if has_target:
+                        candidate_map_coords = self.transpoint.get_map_coords(coords)
+                        if candidate_map_coords is None:
+                            print(
+                                f"{room_name}的{target_name}候选坐标转换失败，"
+                                "继续扫描"
+                            )
+                            continue
+
+                        candidate_height = candidate_map_coords[2]
+                        if not (
+                            TRASH_MAP_MIN_HEIGHT <= candidate_height <=
+                            TRASH_MAP_MAX_HEIGHT
+                        ):
+                            print(
+                                f"忽略{room_name}的{target_name}候选："
+                                f"地图高度{candidate_height:.3f}m不在地面范围"
+                                f"[{TRASH_MAP_MIN_HEIGHT:.2f}, "
+                                f"{TRASH_MAP_MAX_HEIGHT:.2f}]m内"
+                            )
+                            continue
+
                         found_name = target_name
                         camera_coords = coords
+                        map_coords = candidate_map_coords
                         break
                 if found_name is not None:
                     break
@@ -698,12 +732,7 @@ class Controller:
                 pass
             cv2.destroyAllWindows()
 
-        if found_name is None or camera_coords is None:
-            return None
-
-        map_coords = self.transpoint.get_map_coords(camera_coords)
-        if map_coords is None:
-            print(f"{room_name}垃圾地图坐标转换失败")
+        if found_name is None or camera_coords is None or map_coords is None:
             return None
 
         self.voice.announce_trash_found(found_name, room_name)
