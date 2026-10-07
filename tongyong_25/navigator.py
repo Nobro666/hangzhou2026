@@ -28,8 +28,8 @@ class Navigator:
 
     def add(self,location,num):
         self.location[str(num)]=location
-    def goto(self, place, server_timeout=8.0, goal_timeout=100.0,
-             max_attempts=2):
+    def goto(self, place, server_timeout=6.0, goal_timeout=80.0,
+             max_attempts=1):
         """调用传入地点导航，成功返回 True，失败返回 False。"""
         if place not in self.location:
             rospy.logerr("未知导航点：%s", place)

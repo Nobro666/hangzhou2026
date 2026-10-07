@@ -6,6 +6,7 @@ import numpy as np
 import cv2
 import torch
 import time
+import os
 from abc import ABC, abstractmethod
 from ultralytics import YOLO
 import pyrealsense2 as rs
@@ -44,6 +45,12 @@ class Camera(ABC):
     def get_depth(self):
         """Get depth frame from camera"""
         pass
+
+    def get_rgbd(self):
+        """Get color and depth frames; camera subclasses should synchronize them."""
+        ret, color_frame = self.get_frame()
+        retd, depth_image = self.get_depth()
+        return ret, color_frame, retd, depth_image
         
     @abstractmethod
     def get_calibration(self):
@@ -82,6 +89,13 @@ class KinectCamera(Camera):
         capture = self.device.update()
         ret, depth_image = capture.get_transformed_depth_image()
         return ret, depth_image
+
+    def get_rgbd(self):
+        """从同一个K4A Capture取得彩色图和对齐到彩色相机的深度图。"""
+        capture = self.device.update()
+        ret, color_frame = capture.get_color_image()
+        retd, depth_image = capture.get_transformed_depth_image()
+        return ret, color_frame, retd, depth_image
         
     def get_calibration(self):
         return self.K
@@ -125,6 +139,21 @@ class RealSenseCamera(Camera):
         if not depth_frame:
             return False, None
         return True, np.asanyarray(depth_frame.get_data())
+
+    def get_rgbd(self):
+        """从同一组对齐后的RealSense帧取得彩色图和深度图。"""
+        frames = self.pipeline.wait_for_frames()
+        aligned_frames = self.align.process(frames)
+        color_frame = aligned_frames.get_color_frame()
+        depth_frame = aligned_frames.get_depth_frame()
+        if not color_frame or not depth_frame:
+            return False, None, False, None
+        return (
+            True,
+            np.asanyarray(color_frame.get_data()),
+            True,
+            np.asanyarray(depth_frame.get_data()),
+        )
         
     def get_calibration(self):
         return self.K
@@ -164,17 +193,105 @@ class ItemsDetector:
         self.model.to(self.device)
         print(f"Using device: {self.device}")
 
-    def get_target_distance(self, depth_image, x, y):
-        """获取目标距离，参考detect_people.py实现"""
+        # 仅保存达到候选条件的画面，便于比赛后复查误检目标。
+        self.candidate_log_dir = os.environ.get(
+            "TRASH_DETECTION_LOG_DIR",
+            os.path.expanduser("~/.ros/trash_detection_candidates"),
+        )
+        try:
+            os.makedirs(self.candidate_log_dir, exist_ok=True)
+        except OSError as error:
+            print(f"创建垃圾检测日志目录失败：{error}")
+            self.candidate_log_dir = None
+
+    def get_target_distance(self, depth_image, x, y, box=None):
+        """获取目标距离；优先使用检测框中央区域的有效深度中位数。"""
         if depth_image is None:
             return None
         try:
-            if 0 <= y < depth_image.shape[0] and 0 <= x < depth_image.shape[1]:
-                distance = depth_image[int(y), int(x)] * 0.001
+            height, width = depth_image.shape[:2]
+            if box is not None:
+                x1, y1, x2, y2 = map(int, box)
+                box_width = max(1, x2 - x1)
+                box_height = max(1, y2 - y1)
+
+                # 使用框中央50%的区域，减少背景、地板和框边缘噪声。
+                roi_x1 = max(0, x1 + box_width // 4)
+                roi_x2 = min(width, x2 - box_width // 4)
+                roi_y1 = max(0, y1 + box_height // 4)
+                roi_y2 = min(height, y2 - box_height // 4)
+                if roi_x2 > roi_x1 and roi_y2 > roi_y1:
+                    roi = depth_image[roi_y1:roi_y2, roi_x1:roi_x2]
+                    valid_depth = roi[np.isfinite(roi) & (roi > 0)]
+                    if valid_depth.size:
+                        return float(np.median(valid_depth)) * 0.001
+
+            if 0 <= y < height and 0 <= x < width:
+                distance = float(depth_image[int(y), int(x)]) * 0.001
                 return distance if distance > 0 else None
             return None
-        except:
+        except (IndexError, TypeError, ValueError):
             return None
+
+    def boxes_are_close(self, previous_box, current_box, width, height):
+        """判断连续两帧的检测框是否属于画面中的相近位置。"""
+        if previous_box is None:
+            return False
+
+        def box_center(box):
+            return ((box[0] + box[2]) / 2.0, (box[1] + box[3]) / 2.0)
+
+        previous_center = box_center(previous_box)
+        current_center = box_center(current_box)
+        center_distance = np.hypot(
+            current_center[0] - previous_center[0],
+            current_center[1] - previous_center[1],
+        )
+        max_center_distance = np.hypot(width, height) * 0.08
+
+        previous_area = max(1.0, (
+            (previous_box[2] - previous_box[0]) *
+            (previous_box[3] - previous_box[1])
+        ))
+        current_area = max(1.0, (
+            (current_box[2] - current_box[0]) *
+            (current_box[3] - current_box[1])
+        ))
+        area_ratio = current_area / previous_area
+        return center_distance <= max_center_distance and 0.5 <= area_ratio <= 2.0
+
+    def save_candidate_detection(self, frame, result, distance, streak, status):
+        """保存候选检测框、置信度、深度和连续确认次数。"""
+        if self.candidate_log_dir is None:
+            return
+
+        annotated = frame.copy()
+        x1, y1, x2, y2 = map(int, result.box)
+        cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 0, 255), 3)
+        distance_text = "invalid" if distance is None else f"{distance:.2f}m"
+        label = (
+            f"{result.name} conf={result.conf:.2f} "
+            f"depth={distance_text} streak={streak} {status}"
+        )
+        cv2.putText(
+            annotated,
+            label,
+            (max(0, x1), max(30, y1 - 10)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.65,
+            (0, 0, 255),
+            2,
+        )
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        filename = (
+            f"{timestamp}_{time.time_ns() % 1000000000:09d}_"
+            f"{result.name}_{result.conf:.2f}_{status}.jpg"
+        )
+        path = os.path.join(self.candidate_log_dir, filename)
+        if cv2.imwrite(path, annotated):
+            print(f"已保存垃圾候选检测画面：{path}")
+        else:
+            print(f"保存垃圾候选检测画面失败：{path}")
 
     def detect(self, camera, target='person', max_distance=None, depth=True,
                timeout=8):
@@ -192,16 +309,19 @@ class ItemsDetector:
             3d_coords: 三维坐标元组(x, y, z)，若未检测到则为(0, 0, 0)
         """
         start_time = time.time()
+        required_consecutive_frames = 3
+        consecutive_frames = 0
+        previous_box = None
+        confirmed_points = []
         while time.time() - start_time < timeout:
-            ret, color_frame = camera.get_frame()
-            if not ret:
-                continue
-
             if depth:
-                retd, depth_image = camera.get_depth()
-                if not retd:
+                ret, color_frame, retd, depth_image = camera.get_rgbd()
+                if not ret or not retd:
                     continue
             else:
+                ret, color_frame = camera.get_frame()
+                if not ret:
+                    continue
                 depth_image = None
 
             # 执行检测
@@ -211,36 +331,80 @@ class ItemsDetector:
             K = camera.get_calibration()
             height, width = color_frame.shape[:2]
 
-            for result in yoloresults:
-                # 检查是否是目标类别
-                if result.name != target:
+            candidates = [
+                result for result in yoloresults
+                if result.name == target
+                and result.conf >= 0.5
+                and self.judge_range(result.x, width, 1.0)
+            ]
+            if not candidates:
+                consecutive_frames = 0
+                previous_box = None
+                confirmed_points = []
+                continue
+
+            # 同一帧有多个同类目标时，先跟踪置信度最高的检测框。
+            result = max(candidates, key=lambda item: item.conf)
+            if depth:
+                distance = self.get_target_distance(
+                    depth_image,
+                    result.x,
+                    result.y,
+                    box=result.box,
+                )
+                if not distance or (
+                        max_distance is not None and distance > max_distance):
+                    self.save_candidate_detection(
+                        color_frame,
+                        result,
+                        distance,
+                        0,
+                        "invalid_depth",
+                    )
+                    consecutive_frames = 0
+                    previous_box = None
+                    confirmed_points = []
                     continue
+            else:
+                distance = 0.0
 
-                # 检查置信度
-                if result.conf < 0.5:
-                    continue
+            if self.boxes_are_close(previous_box, result.box, width, height):
+                consecutive_frames += 1
+            else:
+                consecutive_frames = 1
+                confirmed_points = []
+            previous_box = list(result.box)
 
-                # 检查是否在有效范围内
-                if not self.judge_range(result.x, width, 1.0):  # 使用全范围检测
-                    continue
+            z = distance
+            point_image = np.array([result.x, result.y, 1])
+            point_3d = z * np.linalg.inv(K).dot(point_image)
+            confirmed_points.append(point_3d)
+            if len(confirmed_points) > required_consecutive_frames:
+                confirmed_points.pop(0)
 
-                # 计算距离（如果需要）
-                if depth and max_distance is not None:
-                    distance = self.get_target_distance(depth_image, result.x, result.y)
-                    if not distance or distance > max_distance:
-                        continue
-                elif depth:
-                    distance = self.get_target_distance(depth_image, result.x, result.y)
-                    if not distance:
-                        continue
-                else:
-                    distance = 0.0  # 无深度信息时默认0
+            status = (
+                "confirmed"
+                if consecutive_frames >= required_consecutive_frames
+                else "candidate"
+            )
+            self.save_candidate_detection(
+                color_frame,
+                result,
+                distance,
+                consecutive_frames,
+                status,
+            )
 
-                # 计算三维坐标，与detect_people.py保持一致
-                z = distance
-                point_image = np.array([result.x, result.y, 1])
-                point_3d = z * np.linalg.inv(K).dot(point_image)
-                return (True, (point_3d[0], point_3d[1], point_3d[2]))
+            if consecutive_frames >= required_consecutive_frames:
+                stable_point = np.median(np.asarray(confirmed_points), axis=0)
+                print(
+                    f"{target}连续{required_consecutive_frames}帧确认成功，"
+                    f"置信度={result.conf:.2f}，距离={distance:.2f}m"
+                )
+                return (
+                    True,
+                    (stable_point[0], stable_point[1], stable_point[2]),
+                )
 
             if cv2.waitKey(10) in [ord('q'), 27]:
                 break
@@ -337,7 +501,12 @@ class ItemsDetector:
     
     def pred(self):
         """Run YOLO prediction on frame"""
-        results = self.model(self.color_frame)
+        results = self.model(
+            self.color_frame,
+            imgsz=1280,
+            conf=0.15,
+            verbose=False,
+        )
         self.color_frame = results[0].plot()
         model_names = results[0].names
         
@@ -345,7 +514,7 @@ class ItemsDetector:
         for result in results[0]:
             box = result.boxes
             x1, y1, x2, y2 = map(int, box.xyxy[0])
-            conf = box.conf[0]
+            conf = float(box.conf[0])
             cls = box.cls[0]
             if model_names[int(cls)] == "Water":
                 center_y = y1/4 + y2/4*3
