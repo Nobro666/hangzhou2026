@@ -18,9 +18,12 @@
 坐着只可能出现在客厅，躺着只可能出现在卧室，是否可以简化判定逻辑
 后期需添加超时直接自主离场，确保能拿到自主离场的分数
 人物需限制在房间范围内
-识别出主人后需靠近进行人机交互
 
-函数复杂可新增文件
+语音识别改拼音匹配
+先找人再找垃圾太死板，能不能先找到什么就去做相应的动作
+
+
+先用头顶相机看垃圾，如果看不到就再用手部相机看
 """
 
 
@@ -428,6 +431,12 @@ class Controller:
         """
         self.voice.say("开始巡游房间", wait=True)
         room_results = []
+        room_arrival_speech = {
+            "room0": "到达客厅",
+            "room1": "到达厨房",
+            "room2": "到达卧室",
+            "room3": "到达餐厅",
+        }
 
         for room_index in range(4):
             room_name = "room" + str(room_index)
@@ -438,6 +447,7 @@ class Controller:
             if not self.navigator.goto(room_name):
                 print(f"无法到达{room_name}，跳过该房间")
                 continue
+            self.voice.say(room_arrival_speech[room_name], wait=True)
 
             observation = self.people_room(room_name)
             if observation is not None:
@@ -642,7 +652,12 @@ class Controller:
             print(f"{room_name}垃圾地图坐标转换失败")
             return None
 
-        self.voice.announce_trash_found(found_name, room_name)
+        if found_name == "empty_bottle":
+            self.voice.say("发现空瓶", wait=True)
+        elif found_name == "paper_ball":
+            self.voice.say("发现纸团", wait=True)
+        else:
+            self.voice.announce_trash_found(found_name, room_name)
         print(
             f"{room_name}发现垃圾：{found_name}，"
             f"相机坐标={camera_coords}，地图坐标={map_coords}"
