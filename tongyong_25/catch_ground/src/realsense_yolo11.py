@@ -33,11 +33,23 @@ class YoloResult:
         return f"物品:{self.name} | 坐标(X,Y,Z):({self.x:.3f},{self.y:.3f},{self.z:.3f}) | 角度:{self.angle:.1f}°"
 
 class RealSenseYolo11Detector:
+    # 同一进程中的多次垃圾抓取共享已加载的YOLO模型。相机pipeline仍然
+    # 每次单独创建和释放，避免复用RealSense流导致设备占用。
+    _model_cache = {}
+
     def __init__(self, weights: Path = Path("weights"), 
                  imgsz: int = 640, conf_thres: float = 0.2, iou_thres: float = 0.45):
         # 初始化YOLOv11模型
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
-        self.model = YOLO(str(weights)).to(self.device)
+        model_path = str(Path(weights).expanduser().resolve())
+        cache_key = (model_path, self.device)
+        if cache_key in self._model_cache:
+            self.model = self._model_cache[cache_key]
+            print(f"复用已加载的垃圾抓取模型：{model_path}")
+        else:
+            self.model = YOLO(model_path).to(self.device)
+            self._model_cache[cache_key] = self.model
+            print(f"首次加载垃圾抓取模型：{model_path}")
 
         # 调试代码：查看模型类别信息
         print("=== 调试:model.names 信息 ===")
