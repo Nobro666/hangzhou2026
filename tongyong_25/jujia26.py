@@ -24,6 +24,9 @@
 
 
 先用头顶相机看垃圾，如果看不到就再用手部相机看
+
+地图范围过滤，人的坐标必须在场地坐标范围内
+先在门口找一遍人和垃圾，哪个置信度高就去找哪个，如果都没有再去房间内部找
 """
 
 
@@ -63,8 +66,10 @@ LOCATION = {
     "chu":[[0.13158331728377007,-0.006716505400027814,0.138],[0.0,0.0,0.0010637781280346942,0.9999994341878871]],
     "start":[[1.4442159164730417,0.12393709459396401,0.138],[0.0,0.0,0.15602370067869278,0.9877533117264278]],
     "room0":[[2.733324741708853,0.7250536048895461,0.138],[0.0,0.0,-0.005270137648095871,0.9999861127281569]],
+    "room1_door":[],
     "room1":[[4.6003966923517154,1.0459468574130684,0.13800000000000004],[0.0,0.0,0.16525682855011448,0.986250566852845]],
     "room2":[[5.599555222316705,-1.3830625515214168,0.138],[0.0,0.0,0.12488564807055481,0.9921711419437664]],
+    "room2_3_door":[],
     "room3":[[4.377265948267691,-2.533630478654654,0.138],[0.0,0.0,0.937220854044187,-0.34873639148314406]],
     "over":[[4.068038268894237,-4.397159735867198,0.138],[0.0,0.0,-0.7343875552222743,0.6787303726330884]],
     "switch":[[5.476704518261456,0.5897450893812475,0.13799999999999996],[0.0,0.0,0.06216837191063609,0.9980656759622488]],
@@ -91,6 +96,18 @@ ROOM_SCAN_STEP_DEGREES = 90.0
 ROOM_SCAN_DETECT_TIMEOUT = 2.0
 ROOM_SCAN_TURN_TIMEOUT = 8.0
 ROOM_SCAN_SETTLE_SECONDS = 0.5
+
+# 人物有效区域（map坐标系，单位：米）。
+# TODO：根据当前比赛地图填写矩形区域的最小/最大X、Y坐标。
+# 参数未填写或范围无效时，人物候选会被拒绝并在终端提示。
+PERSON_AREA_MIN_X = None
+PERSON_AREA_MAX_X = None
+PERSON_AREA_MIN_Y = None
+PERSON_AREA_MAX_Y = None
+
+# 从上述矩形边界向场内收缩的安全余量，单位：米。
+# 不需要向内收缩时保持0.0；边界附近容易误收场外人员时可设为0.1～0.2。
+PERSON_AREA_MARGIN = 0.0
 
 # 人物识别需要保留较远距离，确保站立、坐下或躺下时脸部能够进入画面。
 OWNER_GOAL_MAX_RADIUS = 1.8
@@ -398,10 +415,7 @@ class Controller:
 
         if person_name:
             if name_added:
-                self.voice.say(
-                    f"好的，新增主人姓名，{person_name}",
-                    wait=True,
-                )
+                self.voice.say(f"好的，新增主人姓名，{person_name}",wait=True)
             else:
                 self.voice.say(f"好的，{person_name}", wait=True)
         # ===== 2026-10-01 姓名注册逻辑修正 END =====
@@ -452,7 +466,6 @@ class Controller:
 
         for room_index in range(4):
             room_name = "room" + str(room_index)
-
             print("--------------------------------")
             print(f">>> 正在巡游房间：{room_name}")
             print("--------------------------------")
@@ -532,9 +545,7 @@ class Controller:
             "map_coords": person_result["map_coords"],
             "behavior": behavior,
         }
-        observation_key = (
-            face_id if face_id is not None else f"unknown_{room_name}"
-        )
+        observation_key = (face_id if face_id is not None else f"unknown_{room_name}")
 
         # 人脸和姿态识别均在较远距离完成。只有已经识别到需要执行的
         # 交互行为时，才在执行对应动作前第二次靠近主人。
@@ -750,7 +761,7 @@ class Controller:
                         self.camera,
                         max_distance=5.0,
                         timeout=ROOM_SCAN_DETECT_TIMEOUT,
-                        candidate_filter=self._person_candidate_in_mapped_area,
+                        candidate_filter=self._person_candidate_in_person_area,
                     )
                 )
                 if has_person:
@@ -793,23 +804,56 @@ class Controller:
             "map_coords": map_coords,
         }
 
-    def _person_candidate_in_mapped_area(self, camera_coords):
-        """只接受地图边界内且不属于未知栅格的人物候选。"""
+    def _person_candidate_in_person_area(self, camera_coords):
+        """只接受预设矩形比赛区域内的人物候选。"""
         map_coords = self.transpoint.get_map_coords(camera_coords)
         if map_coords is None:
             print(f"忽略人物候选：相机坐标{camera_coords}转换失败")
             return False
 
-        if not self.goalpoint.is_position_in_mapped_area(map_coords):
+        bounds = (
+            PERSON_AREA_MIN_X,
+            PERSON_AREA_MAX_X,
+            PERSON_AREA_MIN_Y,
+            PERSON_AREA_MAX_Y,
+        )
+        if any(value is None for value in bounds):
+            rospy.logwarn_throttle(
+                5.0,
+                "人物有效区域参数尚未填写，忽略人物候选",
+            )
+            return False
+
+        min_x, max_x, min_y, max_y = map(float, bounds)
+        margin = max(0.0, float(PERSON_AREA_MARGIN))
+        valid_min_x = min_x + margin
+        valid_max_x = max_x - margin
+        valid_min_y = min_y + margin
+        valid_max_y = max_y - margin
+        if valid_min_x >= valid_max_x or valid_min_y >= valid_max_y:
+            rospy.logerr_throttle(
+                5.0,
+                "人物有效区域参数无效，请检查最小值、最大值和边界余量",
+            )
+            return False
+
+        person_x = float(map_coords[0])
+        person_y = float(map_coords[1])
+        if not (
+            valid_min_x <= person_x <= valid_max_x
+            and valid_min_y <= person_y <= valid_max_y
+        ):
             print(
                 "忽略场外人物候选："
-                f"相机坐标={camera_coords}，地图坐标={map_coords}"
+                f"相机坐标={camera_coords}，地图坐标={map_coords}，"
+                f"有效范围=X[{valid_min_x:.2f}, {valid_max_x:.2f}]，"
+                f"Y[{valid_min_y:.2f}, {valid_max_y:.2f}]"
             )
             return False
 
         self.valid_person_map_coords = map_coords
         print(
-            "人物候选位于已建图区域："
+            "人物候选位于比赛区域内："
             f"相机坐标={camera_coords}，地图坐标={map_coords}"
         )
         return True
