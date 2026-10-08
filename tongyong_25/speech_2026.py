@@ -458,7 +458,7 @@ class CompetitionVoiceParser:
             if score > best_py_score:
                 best_py_name, best_py_score = name, score
 
-        min_score = float(os.environ.get("ROBO_NAME_PINYIN_MIN_SCORE", "0.55"))
+        min_score = float(os.environ.get("ROBO_NAME_PINYIN_MIN_SCORE", "0.40"))
         if best_py_name and best_py_score >= min_score:
             print(
                 f"[姓名拼音匹配] 识别文本={text} 拼音={raw_py} -> "
