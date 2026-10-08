@@ -318,10 +318,12 @@ class ItemsDetector:
         return (target_name is not None, coords)
 
     def detect_targets(self, camera, target_items, max_distance=None,
-                       depth=True, timeout=8):
+                       depth=True, timeout=8, return_confidence=False):
         """一次推理同时查找多个目标类别，并返回确认成功的类别和坐标。"""
         target_names = set(target_items)
         if not target_names:
+            if return_confidence:
+                return (None, (0.0, 0.0, 0.0), 0.0)
             return (None, (0.0, 0.0, 0.0))
 
         start_time = time.time()
@@ -425,14 +427,18 @@ class ItemsDetector:
                     f"{result.name}连续{required_consecutive_frames}帧确认成功，"
                     f"置信度={result.conf:.2f}，距离={distance:.2f}m"
                 )
-                return (
-                    result.name,
-                    (stable_point[0], stable_point[1], stable_point[2]),
+                coords = (
+                    stable_point[0], stable_point[1], stable_point[2]
                 )
+                if return_confidence:
+                    return (result.name, coords, float(result.conf))
+                return (result.name, coords)
 
             if cv2.waitKey(10) in [ord('q'), 27]:
                 break
 
+        if return_confidence:
+            return (None, (0.0, 0.0, 0.0), 0.0)
         return (None, (0.0, 0.0, 0.0))
     
     def get_object_classes_sorted(self, camera, range=0.8, visualize=True):
