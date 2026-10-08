@@ -127,7 +127,7 @@ class PersonDetector:
             return None
 
     def detect_person(self, camera, max_distance, timeout=5.0,
-                      candidate_filter=None):
+                      candidate_filter=None, return_confidence=False):
         """
         检测指定距离内是否有人，并返回人的三维坐标
         参数:
@@ -136,6 +136,7 @@ class PersonDetector:
             timeout: 单个方向的最长检测时间(秒)
             candidate_filter: 可选候选过滤函数，接收相机三维坐标并返回
                 True/False。返回False时继续检查同一帧其他人物和后续帧。
+            return_confidence: 为True时额外返回检测置信度。
         返回:
             (has_person, 3d_coords)
             has_person: 布尔值，表示是否检测到指定距离内的人
@@ -162,7 +163,7 @@ class PersonDetector:
                 x1, y1, x2, y2 = map(int, box.xyxy[0])
                 center_x = (x1 + x2) / 2
                 center_y = (y1 + y2) / 2
-                conf = box.conf[0]
+                conf = float(box.conf[0])
 
                 if conf < 0.5:
                     continue
@@ -192,11 +193,15 @@ class PersonDetector:
                         print(f"人物候选位置过滤发生异常：{error}")
                         continue
 
+                if return_confidence:
+                    return (True, person_coords, conf)
                 return (True, person_coords)
 
             if cv2.waitKey(10) == ord('q'):
                 break
 
+        if return_confidence:
+            return (False, (0.0, 0.0, 0.0), 0.0)
         return (False, (0.0, 0.0, 0.0))
 
 if __name__ == "__main__":
