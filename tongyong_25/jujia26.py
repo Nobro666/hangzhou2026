@@ -26,8 +26,11 @@
 先用头顶相机看垃圾，如果看不到就再用手部相机看
 
 地图范围过滤，人的坐标必须在场地坐标范围内
-先在门口找一遍人和垃圾，先处理置信度较高者，
+先在门口找一遍人和垃圾，先处理距离较近者，
 再进入房间内部完成剩余任务
+
+
+问需求的人机交互问完还需不需要做别的
 """
 
 
@@ -466,9 +469,10 @@ class Controller:
         巡游四个房间。
 
         先在每个房间的门口朝预设方向各检测一次人物和垃圾；
-        有候选时先处理置信度较高者，然后进入房间完成另一项任务；
-        两者都没有时，进入房间完成两项任务。房间内保留原有
-        的4方向分段旋转搜索。
+        门口同时看到人物和垃圾时保存两组坐标，按距离由近到远
+        依次处理。只看到一项时，先处理该项，再进入房间完成
+        另一项任务；两者都没有时，进入房间完成两项任务。
+        房间内保留原有的4方向分段旋转搜索。
         """
         self.voice.say("开始巡游房间", wait=True)
         room_results = []
@@ -501,41 +505,54 @@ class Controller:
                 person_candidate, trash_candidate = (
                     self.find_targets_at_door(room_name, door_name)
                 )
-                if person_candidate is not None or trash_candidate is not None:
-                    person_confidence = (
-                        person_candidate["confidence"]
-                        if person_candidate is not None else -1.0
+                door_candidates = []
+                if person_candidate is not None:
+                    door_candidates.append(
+                        ("person", person_candidate["distance"], person_candidate)
                     )
-                    trash_confidence = (
-                        trash_candidate["confidence"]
-                        if trash_candidate is not None else -1.0
+                if trash_candidate is not None:
+                    door_candidates.append(
+                        ("trash", trash_candidate["distance"], trash_candidate)
                     )
-                    print(
-                        f"{door_name}候选置信度："
-                        f"人物={person_confidence:.2f}，"
-                        f"垃圾={trash_confidence:.2f}"
+
+                # 两者距离相同时垃圾优先，因为垃圾坐标不会移动。
+                door_candidates.sort(key=lambda item: (item[1], 0 if item[0] == "trash" else 1))
+                if door_candidates:
+                    order_text = " -> ".join(
+                        f"{'人物' if kind == 'person' else '垃圾'}"
+                        f"({distance:.2f}m)"
+                        for kind, distance, _ in door_candidates
                     )
-                    if person_confidence >= trash_confidence:
-                        print(f"{door_name}优先处理人物候选")
-                        observation = self.people_room(
-                            room_name,
-                            person_result=person_candidate,
+                    print(f"{door_name}按距离处理顺序：{order_text}")
+
+                for candidate_kind, candidate_distance, candidate in door_candidates:
+                    if candidate_kind == "person":
+                        print(
+                            f"{door_name}处理人物候选，"
+                            f"距离={candidate_distance:.2f}m，"
+                            f"置信度={candidate['confidence']:.2f}"
                         )
+                        observation = self.people_room(room_name,person_result=candidate)
                         if observation is not None:
                             room_results.append(observation)
                             door_person_done = True
                     else:
-                        print(f"{door_name}优先处理垃圾候选")
-                        trash_result = self.trash_room(
-                            room_name,
-                            trash_result=trash_candidate,
+                        print(
+                            f"{door_name}处理垃圾候选，"
+                            f"距离={candidate_distance:.2f}m，"
+                            f"置信度={candidate['confidence']:.2f}"
                         )
+                        trash_result = self.trash_room(room_name,trash_result=candidate)
                         door_trash_done = trash_result is not None
 
-                    if (len(self.recognized_owner_ids) >= 3 and
-                            self.cleaned_trash_count >= TRASH_TARGET_COUNT):
-                        print("三位主人任务和三个垃圾任务均已完成")
-                        break
+                if (len(self.recognized_owner_ids) >= 3 and
+                        self.cleaned_trash_count >= TRASH_TARGET_COUNT):
+                    print("三位主人任务和三个垃圾任务均已完成")
+                    break
+
+            if door_person_done and door_trash_done:
+                print(f"{door_name}已完成人物和垃圾任务，进入下一个房间")
+                continue
             if door_person_done:
                 print(f"{door_name}已完成人物任务，进入{room_name}搜索垃圾")
             elif door_trash_done:
@@ -567,8 +584,7 @@ class Controller:
 
                 self.trash_room(room_name)
 
-            if (len(self.recognized_owner_ids) >= 3 and
-                    self.cleaned_trash_count >= TRASH_TARGET_COUNT):
+            if (len(self.recognized_owner_ids) >= 3 and self.cleaned_trash_count >= TRASH_TARGET_COUNT):
                 print("三位主人任务和三个垃圾任务均已完成")
                 break
         print("巡游房间结束")
@@ -600,11 +616,13 @@ class Controller:
             )
             person_map_coords = self.valid_person_map_coords
             if has_person and person_map_coords is not None:
+                person_distance = sum(float(value) ** 2 for value in person_coords) ** 0.5
                 person_result = {
                     "room_name": room_name,
                     "camera_coords": person_coords,
                     "map_coords": person_map_coords,
                     "confidence": person_confidence,
+                    "distance": person_distance,
                 }
 
             print(f"{door_name}单方向快速检测垃圾")
@@ -621,21 +639,22 @@ class Controller:
                 trash_map_coords = self.transpoint.get_map_coords(trash_coords)
                 if trash_map_coords is None:
                     print(f"{door_name}的{trash_name}坐标转换失败")
-                elif not (
-                    TRASH_MAP_MIN_HEIGHT <= trash_map_coords[2]
-                    <= TRASH_MAP_MAX_HEIGHT
-                ):
+                elif not (TRASH_MAP_MIN_HEIGHT <= trash_map_coords[2] <= TRASH_MAP_MAX_HEIGHT):
                     print(
                         f"忽略{door_name}的{trash_name}候选："
                         f"地图高度{trash_map_coords[2]:.3f}m不在地面范围内"
                     )
                 else:
+                    trash_distance = sum(
+                        float(value) ** 2 for value in trash_coords
+                    ) ** 0.5
                     trash_result = {
                         "room_name": room_name,
                         "trash_name": trash_name,
                         "camera_coords": trash_coords,
                         "map_coords": trash_map_coords,
                         "confidence": trash_confidence,
+                        "distance": trash_distance,
                     }
         except Exception as error:
             print(f"{door_name}门口快速检测发生异常：{error}")
@@ -1123,12 +1142,8 @@ class Controller:
                 "正在启动Azure Kinect姿态识别，"
                 f"采样帧数={BEHAVIOR_RECOGNIZE_FRAMES}"
             )
-            behavior_detector = BehaviorDetector(
-                BEHAVIOR_K4ABT_LIB_PATH
-            )
-            detected_behavior = behavior_detector.recognize(
-                frames=BEHAVIOR_RECOGNIZE_FRAMES
-            )
+            behavior_detector = BehaviorDetector(BEHAVIOR_K4ABT_LIB_PATH)
+            detected_behavior = behavior_detector.recognize(frames=BEHAVIOR_RECOGNIZE_FRAMES)
             print(f"behavior_detector原始结果：{detected_behavior}")
 
             behavior_mapping = {
