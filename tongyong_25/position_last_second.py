@@ -62,13 +62,13 @@ class SmartGoalFinder:
         """保存最新静态地图消息。"""
         self.map_data = map_message
 
-    def is_position_in_mapped_area(self, map_coords, map_wait_timeout=1.0):
+    def is_position_in_mapped_area(self, map_coords, map_wait_timeout=1.0, search_radius=0.2):
         """
-        判断map坐标是否落在已建图栅格内。
+        判断map坐标周围search_radius米内是否存在已建图栅格。
 
         OccupancyGrid中的-1表示未知区域；0～100均表示地图已经观测过。
         这里不要求目标点必须是自由栅格，以免误删床上、沙发旁或靠墙的
-        场内人物。函数只负责排除地图边界外和未知区域中的候选。
+        场内人物。默认允许0.2米的地图边界和定位误差。
         """
         if map_coords is None or len(map_coords) < 2:
             return False
@@ -92,6 +92,8 @@ class SmartGoalFinder:
 
         map_x = float(map_coords[0])
         map_y = float(map_coords[1])
+        if not math.isfinite(search_radius) or search_radius < 0:
+            return False
         if not math.isfinite(map_x) or not math.isfinite(map_y):
             return False
 
@@ -114,16 +116,29 @@ class SmartGoalFinder:
         local_x = cos_yaw * delta_x + sin_yaw * delta_y
         local_y = -sin_yaw * delta_x + cos_yaw * delta_y
 
-        grid_x = int(math.floor(local_x / map_info.resolution))
-        grid_y = int(math.floor(local_y / map_info.resolution))
-        if not (0 <= grid_x < map_info.width and 0 <= grid_y < map_info.height):
-            return False
+        # 接受坐标周围搜索圆内相交的任意已观测地图栅格。
+        resolution = map_info.resolution
+        min_x = max(0, int(math.floor((local_x - search_radius) / resolution)))
+        max_x = min(map_info.width - 1, int(math.floor((local_x + search_radius) / resolution)))
+        min_y = max(0, int(math.floor((local_y - search_radius) / resolution)))
+        max_y = min(map_info.height - 1, int(math.floor((local_y + search_radius) / resolution)))
+        radius_squared = search_radius * search_radius
 
-        map_index = grid_y * map_info.width + grid_x
-        if not (0 <= map_index < len(map_message.data)):
-            return False
+        for grid_y in range(min_y, max_y + 1):
+            cell_bottom = grid_y * resolution
+            cell_top = cell_bottom + resolution
+            distance_y = max(cell_bottom - local_y, 0.0, local_y - cell_top)
+            for grid_x in range(min_x, max_x + 1):
+                cell_left = grid_x * resolution
+                cell_right = cell_left + resolution
+                distance_x = max(cell_left - local_x, 0.0, local_x - cell_right)
+                if distance_x * distance_x + distance_y * distance_y > radius_squared:
+                    continue
 
-        return map_message.data[map_index] != -1
+                map_index = grid_y * map_info.width + grid_x
+                if map_index < len(map_message.data) and map_message.data[map_index] != -1:
+                    return True
+        return False
 
     def get_robot_pose(self):
         """获取机器人当前在map坐标系下的位姿"""
