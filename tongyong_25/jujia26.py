@@ -14,23 +14,21 @@
 7. 从出口自主离场
 
 优化思路：
-躺着的人可能识别不到，调整找人逻辑，直接导航到床边？
-坐着只可能出现在客厅，躺着只可能出现在卧室，是否可以简化判定逻辑
-后期需添加超时直接自主离场，确保能拿到自主离场的分数
-人物需限制在房间范围内
-
-语音识别改拼音匹配
-先找人再找垃圾太死板，能不能先找到什么就去做相应的动作
-
-
-先用头顶相机看垃圾，如果看不到就再用手部相机看
 
 地图范围过滤，人的坐标必须在场地坐标范围内
 先在门口找一遍人和垃圾，先处理距离较近者，
 再进入房间内部完成剩余任务
 
+只有摔倒后的人机交互保留第二次靠近
+底盘速度调快
+未知人物未知动作随便蒙一个
+添加超时直接自主离场，确保能拿到自主离场的分数
 
+需要明确的地方：
 问需求的人机交互问完还需不需要做别的
+
+注意：
+到场地后除了打需要导航到的点外，还要在赛场的四个角落各打一个点，确认赛场范围
 """
 
 
@@ -131,16 +129,13 @@ OWNER_GOAL_MIN_RADIUS = 1.6
 OWNER_CLOSE_MAX_RADIUS = 1.1
 OWNER_CLOSE_MIN_RADIUS = 0.8
 
-# 垃圾抓取仍使用较近的导航距离，避免受人物识别距离影响。
+# 垃圾抓取导航距离
 TRASH_GOAL_MAX_RADIUS = 0.7
 TRASH_GOAL_MIN_RADIUS = 0.5
 
 # Azure Kinect Body Tracking动态库及行为识别采样帧数。
 # 可通过环境变量覆盖动态库路径，便于不同机器人部署。
-BEHAVIOR_K4ABT_LIB_PATH = os.environ.get(
-    "K4ABT_LIB_PATH",
-    "/lib/libk4abt.so",
-)
+BEHAVIOR_K4ABT_LIB_PATH = os.environ.get("K4ABT_LIB_PATH","/lib/libk4abt.so")
 BEHAVIOR_RECOGNIZE_FRAMES = 20
 
 # 垃圾粗定位类别。应与Kinect检测模型和catch_ty.py中的RealSense
@@ -184,10 +179,7 @@ class Controller:
         print("==============视觉初始化完成==============")
 
         self.speak = SummerTTSSpeaker()
-        self.voice = CompetitionVoiceService(
-            owner_names=target_name,
-            speaker=self.speak,
-        )
+        self.voice = CompetitionVoiceService(owner_names=target_name, speaker=self.speak)
         print("==============语音初始化完成==============")
 
         # 保存人脸 ID、主人编号和姓名
@@ -366,15 +358,13 @@ class Controller:
         max_attempts = 3
         face_attempts = 0
 
-        self.voice.say(f"请主人{owner_index}站在我面前，保持静止", wait=True)
+        self.voice.say(f"请主人{owner_index}站在我面前", wait=True)
 
         while (person_id is None and face_attempts < max_attempts and not rospy.is_shutdown()):
             face_attempts += 1
             print(f">>> 正在进行人脸注册...（第{face_attempts}/{max_attempts}次）")
             try:
-                person_id = self.face.register_new_face(
-                    prompt_callback=lambda prompt: self.voice.say(prompt, wait=True)
-                )
+                person_id = self.face.register_new_face(prompt_callback=lambda prompt: self.voice.say(prompt, wait=True))
             except Exception as error:
                 print(f"人脸注册发生异常: {error}")
                 person_id = None
@@ -427,10 +417,7 @@ class Controller:
             print(f"姓名语音识别发生异常: {error}")
 
         if person_name:
-            if name_added:
-                self.voice.say(f"好的，新增主人姓名，{person_name}",wait=True)
-            else:
-                self.voice.say(f"好的，{person_name}", wait=True)
+                self.voice.say(f"好的，{person_name}",wait=True)
         # ===== 2026-10-01 姓名注册逻辑修正 END =====
 
         if not person_name:
@@ -502,20 +489,14 @@ class Controller:
                     door_scan_available = False
 
             if door_scan_available:
-                person_candidate, trash_candidate = (
-                    self.find_targets_at_door(room_name, door_name)
-                )
+                person_candidate, trash_candidate = (self.find_targets_at_door(room_name, door_name))
                 door_candidates = []
                 if person_candidate is not None:
-                    door_candidates.append(
-                        ("person", person_candidate["distance"], person_candidate)
-                    )
+                    door_candidates.append(("person", person_candidate["distance"], person_candidate))
                 if trash_candidate is not None:
-                    door_candidates.append(
-                        ("trash", trash_candidate["distance"], trash_candidate)
-                    )
+                    door_candidates.append(("trash", trash_candidate["distance"], trash_candidate))
 
-                # 两者距离相同时垃圾优先，因为垃圾坐标不会移动。
+                # 两者距离相同时垃圾优先
                 door_candidates.sort(key=lambda item: (item[1], 0 if item[0] == "trash" else 1))
                 if door_candidates:
                     order_text = " -> ".join(
@@ -645,9 +626,7 @@ class Controller:
                         f"地图高度{trash_map_coords[2]:.3f}m不在地面范围内"
                     )
                 else:
-                    trash_distance = sum(
-                        float(value) ** 2 for value in trash_coords
-                    ) ** 0.5
+                    trash_distance = sum(float(value) ** 2 for value in trash_coords) ** 0.5
                     trash_result = {
                         "room_name": room_name,
                         "trash_name": trash_name,
@@ -715,11 +694,12 @@ class Controller:
         }
         observation_key = (face_id if face_id is not None else f"unknown_{room_name}")
 
-        # 人脸和姿态识别均在较远距离完成。只有已经识别到需要执行的
-        # 交互行为时，才在执行对应动作前第二次靠近主人。
-        if behavior != ACTION_UNKNOWN:
+        # 人脸和姿态识别均在第一次靠近的距离完成。
+        # 只有摔倒救助动作需要在交互前第二次靠近主人；
+        # 坐下、躺下和挥手直接在当前位置执行交互。
+        if behavior == ACTION_FALL:
             if not self.approach_owner_closer(person_result["map_coords"]):
-                print(f"无法进一步接近{room_name}中的主人，取消人机交互")
+                print(f"无法进一步接近{room_name}中摔倒的主人，取消救助交互")
                 observation["interaction_success"] = False
                 self.owner_observations[observation_key] = observation
                 return observation
