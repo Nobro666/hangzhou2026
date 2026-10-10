@@ -127,7 +127,7 @@ OWNER_GOAL_MIN_RADIUS = 1.6
 
 # 完成人脸和姿态识别后，使用同一个人物地图坐标再次规划更近的导航点。
 OWNER_CLOSE_MAX_RADIUS = 1.1
-OWNER_CLOSE_MIN_RADIUS = 0.8
+OWNER_CLOSE_MIN_RADIUS = 0.7
 
 # 垃圾抓取导航距离
 TRASH_GOAL_MAX_RADIUS = 0.7
@@ -543,7 +543,7 @@ class Controller:
             if not self.navigator.goto(room_name):
                 print(f"无法到达{room_name}，跳过该房间")
                 continue
-            self.voice.say(room_arrival_speech[room_name], wait=True)
+            self.voice.say(room_arrival_speech[room_name], wait=False)
 
             interior_person_attempted = False
             if not door_person_done:
@@ -1165,7 +1165,7 @@ class Controller:
             return self.handle_wave_behavior(person_name)
 
         print(f"{person_name}的行为尚未识别，暂不执行交互动作")
-        self.voice.say("暂时没有识别出你的行为", wait=True)
+        self.voice.say("暂时没有识别出你的行为", wait=False)
         return False
 
     def handle_switch_behavior(self, person_name):
@@ -1198,7 +1198,7 @@ class Controller:
             switch_action = "open"
         else:
             print(f"无法判断开关需求：{switch_command}")
-            self.voice.say("没有听清需要打开还是关闭", wait=True)
+            self.voice.say("没有听清需要打开还是关闭", wait=False)
             return False
 
         try:
@@ -1210,9 +1210,9 @@ class Controller:
             )
             success = switch_controller.go_to(switch_action)
             if success:
-                self.voice.say("开关操作已完成", wait=True)
+                self.voice.say("开关操作已完成", wait=False)
             else:
-                self.voice.say("开关操作失败", wait=True)
+                self.voice.say("开关操作失败", wait=False)
             return success
         except (Exception, SystemExit) as error:
             print(f"执行开关动作发生异常：{error}")
@@ -1224,7 +1224,7 @@ class Controller:
         try:
             from arm2people_final import TARGET_POSE
 
-            self.voice.say(f"{person_name}，我来帮助你", wait=True)
+            self.voice.say(f"{person_name}，我来帮助你", wait=False)
             print(f"摔倒救助机械臂目标位姿：{TARGET_POSE}")
             self.kinova.arm_run(unit="mq", pose_target=TARGET_POSE)
             print("摔倒救助机械臂动作已执行")
@@ -1319,7 +1319,7 @@ class Controller:
             )
 
         """---自主离场---"""
-        self.voice.say("开始自主离场", wait=True)
+        self.voice.say("开始自主离场", wait=False)
         if not self.navigator.goto("over"):
             print("自主离场导航失败")
 

@@ -374,13 +374,6 @@ class ItemsDetector:
                 )
                 if not distance or (
                         max_distance is not None and distance > max_distance):
-                    self.save_candidate_detection(
-                        color_frame,
-                        result,
-                        distance,
-                        0,
-                        "invalid_depth",
-                    )
                     consecutive_frames = 0
                     previous_box = None
                     previous_name = None
@@ -408,20 +401,16 @@ class ItemsDetector:
             if len(confirmed_points) > required_consecutive_frames:
                 confirmed_points.pop(0)
 
-            status = (
-                "confirmed"
-                if consecutive_frames >= required_consecutive_frames
-                else "candidate"
-            )
-            self.save_candidate_detection(
-                color_frame,
-                result,
-                distance,
-                consecutive_frames,
-                status,
-            )
-
             if consecutive_frames >= required_consecutive_frames:
+                # 比赛流程只保存最终确认成功的画面，避免候选阶段逐帧
+                # JPEG编码和磁盘写入拖慢连续帧检测。
+                self.save_candidate_detection(
+                    color_frame,
+                    result,
+                    distance,
+                    consecutive_frames,
+                    "confirmed",
+                )
                 stable_point = np.median(np.asarray(confirmed_points), axis=0)
                 print(
                     f"{result.name}连续{required_consecutive_frames}帧确认成功，"
@@ -537,7 +526,6 @@ class ItemsDetector:
             conf=0.15,
             verbose=False,
         )
-        self.color_frame = results[0].plot()
         model_names = results[0].names
         
         yoloresults = []

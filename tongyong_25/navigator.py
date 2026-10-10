@@ -28,7 +28,7 @@ class Navigator:
 
     def add(self,location,num):
         self.location[str(num)]=location
-    def goto(self, place, server_timeout=7.0, goal_timeout=100.0,
+    def goto(self, place, server_timeout=7.0, goal_timeout=50.0,
              max_attempts=2):
         """调用传入地点导航，成功返回 True，失败返回 False。"""
         if place not in self.location:
