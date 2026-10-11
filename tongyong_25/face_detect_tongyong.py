@@ -27,7 +27,7 @@ main函数调用方法:
 
 注册前检查是否已经注册，避免同一个人产生多个 ID
 
-添加语音提示回调，注册侧脸前播报“请向左转一点”“请向右转一点”
+人脸注册连续采集三张实时正脸，不再要求主人向左或向右转头
 
 阈值0.65—>0.5，降低误识别率
 
@@ -432,11 +432,12 @@ class Detector:
             return best_match, best_distance
         return None, best_distance
 
-    # ===== 2026-10-01 修改：增加左转、右转语音提示回调 START =====
+    # ===== 2026-10-11 修改：连续采集三张正脸 START =====
     def _capture_face_for_registration(self, person_id, prompt,
                                        prompt_callback=None,
-                                       max_attempts=3):
-        """按指定朝向采集一张人脸，避免未检测到时无限等待。"""
+                                       max_attempts=3,
+                                       settle_seconds=0.4):
+        """重新读取实时画面并采集一张人脸，避免重复保存同一帧。"""
         for attempt in range(1, max_attempts + 1):
             print(f"{prompt}（第{attempt}/{max_attempts}次）")
             if prompt_callback is not None:
@@ -445,8 +446,8 @@ class Detector:
                 # 播报完成后留出短暂时间，让主人稳定头部姿态。
                 time.sleep(1)
             else:
-                # 未提供语音回调时保持原有等待逻辑。
-                time.sleep(3 if attempt == 1 else 2)
+                # 连续正脸采集不再播报左右转提示，只留出短暂帧间隔。
+                time.sleep(settle_seconds)
 
             img_path = self.take_photo(self.device)
             face = self.detect_faces(img_path)
@@ -464,7 +465,7 @@ class Detector:
             self.save_face_image(face_img, person_id)
             return True
 
-        print(f"{prompt}的人脸采集失败，跳过该角度")
+        print(f"{prompt}的人脸采集失败，跳过该照片")
         return False
 
     def _save_front_face_for_registration(self, person_id, img_path, face):
@@ -484,24 +485,18 @@ class Detector:
         self._save_front_face_for_registration(person_id, img_path, face)
         return 1
 
-    def _register_front_and_sides(self, person_id, img_path, face,
-                                  prompt_callback=None):
-        """方案二：保存正面、左侧和右侧人脸照片。"""
+    def _register_three_front_faces(self, person_id, img_path, face):
+        """连续保存三张实时正脸照片，不要求主人左右转头。"""
         self._save_front_face_for_registration(person_id, img_path, face)
         saved_face_count = 1
 
-        if self._capture_face_for_registration(
-            person_id,
-            "请向左转一点",
-            prompt_callback=prompt_callback
-        ):
-            saved_face_count += 1
-        if self._capture_face_for_registration(
-            person_id,
-            "请向右转一点",
-            prompt_callback=prompt_callback
-        ):
-            saved_face_count += 1
+        for photo_index in range(2, 4):
+            if self._capture_face_for_registration(
+                person_id,
+                prompt_callback=None,
+                settle_seconds=0.4,
+            ):
+                saved_face_count += 1
 
         return saved_face_count
 
@@ -557,14 +552,13 @@ class Detector:
         #     face
         # )
 
-        # 方案二：拍正面、左侧和右侧三张照片。
-        saved_face_count = self._register_front_and_sides(
+        # 方案二：连续拍摄三张实时正脸（当前启用）。
+        saved_face_count = self._register_three_front_faces(
             new_person_id,
             img_path,
-            face,
-            prompt_callback=prompt_callback
+            face
         )
-        # ===== 2026-10-01 修改：增加左转、右转语音提示回调 END =====
+        # ===== 2026-10-11 修改：连续采集三张正脸 END =====
 
         self.detect_result = new_person_id
         print(

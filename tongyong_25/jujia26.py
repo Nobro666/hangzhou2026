@@ -65,18 +65,18 @@ from geometry_msgs.msg import PoseWithCovarianceStamped
 
 # 储存导航路径点
 LOCATION = {  
-    "chu":[[0.13158331728377007,-0.006716505400027814,0.138],[0.0,0.0,0.0010637781280346942,0.9999994341878871]],
-    "start":[[1.4442159164730417,0.12393709459396401,0.138],[0.0,0.0,0.15602370067869278,0.9877533117264278]],
-    "room0":[[2.733324741708853,0.7250536048895461,0.138],[0.0,0.0,-0.005270137648095871,0.9999861127281569]],
-    "room1_door":[],
-    "room1":[[4.6003966923517154,1.0459468574130684,0.13800000000000004],[0.0,0.0,0.16525682855011448,0.986250566852845]],
-    "room2_door":[],
-    "room2":[[5.599555222316705,-1.3830625515214168,0.138],[0.0,0.0,0.12488564807055481,0.9921711419437664]],
-    "room3_door":[],
-    "room3":[[4.377265948267691,-2.533630478654654,0.138],[0.0,0.0,0.937220854044187,-0.34873639148314406]],
-    "over":[[4.068038268894237,-4.397159735867198,0.138],[0.0,0.0,-0.7343875552222743,0.6787303726330884]],
+    "chu":[[0.2294933634358087,0.032122850422528625,0.138],[0.0,0.0,0.055449040823648266,0.9984615184731646]],
+    "start":[[1.3805251010321327,0.150363578061142,0.13800000000000004],[0.0,0.0,0.13667084084624048,0.9906165157427881]],
+    "room0":[[2.6850575937353462,0.6419095720989721,0.13800000000000004],[0.0,0.0,-0.021572021136269555,0.9997672968766763]],
+    "room1_door":[[3.9969486212190874,-0.8500081702932526,0.138],[0.0,0.0,-0.5587124353962433,0.8293614498718872]],
+    "room1":[[4.330788395935133,-1.8383054733246176,0.13800000000000004],[0.0,0.0,0.08057844734440155,0.9967482700379096]],
+    "room2_door":[[1.3805251010321327,0.150363578061142,0.13800000000000004],[0.0,0.0,0.13667084084624048,0.9906165157427881]],
+    "room2":[[2.6850575937353462,0.6419095720989721,0.13800000000000004],[0.0,0.0,-0.021572021136269555,0.9997672968766763]],
+    "room3_door":[[3.9969486212190874,-0.8500081702932526,0.138],[0.0,0.0,-0.5587124353962433,0.8293614498718872]],
+    "room3":[[4.330788395935133,-1.8383054733246176,0.13800000000000004],[0.0,0.0,0.08057844734440155,0.9967482700379096]],
+    "over":[[1.3805251010321327,0.150363578061142,0.13800000000000004],[0.0,0.0,0.13667084084624048,0.9906165157427881]],
     "switch":[[5.476704518261456,0.5897450893812475,0.13799999999999996],[0.0,0.0,0.06216837191063609,0.9980656759622488]],
-    "trash_can":[[3.4399235099554977,-2.297665895918219,0.138],[0.0,0.0,0.9981220032837491,0.06125737964388872]],
+    "trash_can":[[3.3662073600343705,-1.9891132444264676,0.138],[0.0,0.0,0.9992182243141545,0.03953403847911236]],
     "bed":[]
 }
 
@@ -112,10 +112,10 @@ DOOR_SCAN_DETECT_TIMEOUT = 2.0
 # 人物有效区域（map坐标系，单位：米）。
 # TODO：根据当前比赛地图填写矩形区域的最小/最大X、Y坐标。
 # 参数未填写或范围无效时，人物候选会被拒绝并在终端提示。
-PERSON_AREA_MIN_X = None
-PERSON_AREA_MAX_X = None
-PERSON_AREA_MIN_Y = None
-PERSON_AREA_MAX_Y = None
+PERSON_AREA_MIN_X = 0
+PERSON_AREA_MAX_X = 6.0
+PERSON_AREA_MIN_Y = -2.0
+PERSON_AREA_MAX_Y = 4.0
 
 # 从上述矩形边界向场内收缩的安全余量，单位：米。
 # 不需要向内收缩时保持0.0；边界附近容易误收场外人员时可设为0.1～0.2。
@@ -126,12 +126,12 @@ OWNER_GOAL_MAX_RADIUS = 1.8
 OWNER_GOAL_MIN_RADIUS = 1.6
 
 # 完成人脸和姿态识别后，使用同一个人物地图坐标再次规划更近的导航点。
-OWNER_CLOSE_MAX_RADIUS = 1.1
-OWNER_CLOSE_MIN_RADIUS = 0.7
+OWNER_CLOSE_MAX_RADIUS = 1.0
+OWNER_CLOSE_MIN_RADIUS = 0.6
 
 # 垃圾抓取导航距离
-TRASH_GOAL_MAX_RADIUS = 0.7
-TRASH_GOAL_MIN_RADIUS = 0.5
+TRASH_GOAL_MAX_RADIUS = 0.6
+TRASH_GOAL_MIN_RADIUS = 0.4
 
 # Azure Kinect Body Tracking动态库及行为识别采样帧数。
 # 可通过环境变量覆盖动态库路径，便于不同机器人部署。
@@ -291,14 +291,14 @@ class Controller:
         wait_duration = 5.0 
 
         # 2. 设置你的机器人在 'map' 坐标系下的初始坐标 (单位：米)
-        pos_x = 0.4576881647866494  # <-- 在这里填入你的X坐标
-        pos_y = -0.055454671844406035  # <-- 在这里填入你的Y坐标
+        pos_x = 0.18724654589511103  # <-- 在这里填入你的X坐标
+        pos_y = 0.06689525747505881  # <-- 在这里填入你的Y坐标
         
         # 3. 设置你的机器人的初始朝向 (四元数)
         quat_x = 0.0  # <-- 在这里填入你的四元数X
         quat_y = 0.0  # <-- 在这里填入你的四元数Y
-        quat_z = 0.013112045382736552  # <-- 在这里填入你的四元数Z
-        quat_w = 0.9999140334378156  # <-- 在这里填入你的四元数W
+        quat_z = 0.04583087242207054  # <-- 在这里填入你的四元数Z
+        quat_w = 0.9989492134903716  # <-- 在这里填入你的四元数W
         # --- 配置结束 ---
 
         # 创建一个发布者，发布到 /initialpose 话题
@@ -358,7 +358,7 @@ class Controller:
         max_attempts = 3
         face_attempts = 0
 
-        self.voice.say(f"请主人{owner_index}站在我面前", wait=True)
+        self.voice.say(f"主人{owner_index}", wait=True)
 
         while (person_id is None and face_attempts < max_attempts and not rospy.is_shutdown()):
             face_attempts += 1
@@ -694,12 +694,9 @@ class Controller:
         }
         observation_key = (face_id if face_id is not None else f"unknown_{room_name}")
 
-        # 人脸和姿态识别均在第一次靠近的距离完成。
-        # 只有摔倒救助动作需要在交互前第二次靠近主人；
-        # 坐下、躺下和挥手直接在当前位置执行交互。
-        if behavior == ACTION_FALL:
+        if behavior != ACTION_UNKNOWN:
             if not self.approach_owner_closer(person_result["map_coords"]):
-                print(f"无法进一步接近{room_name}中摔倒的主人，取消救助交互")
+                print(f"无法进一步接近{room_name}中的主人，取消救助交互")
                 observation["interaction_success"] = False
                 self.owner_observations[observation_key] = observation
                 return observation
@@ -789,9 +786,9 @@ class Controller:
         """统一播报并打印已确认的垃圾候选。"""
         found_name = trash_result["trash_name"]
         if found_name == "empty_bottle":
-            self.voice.say("发现空瓶", wait=True)
+            self.voice.say("发现空瓶", wait=False)
         elif found_name == "paper_ball":
-            self.voice.say("发现纸团", wait=True)
+            self.voice.say("发现纸团", wait=False)
         else:
             self.voice.announce_trash_found(found_name, room_name)
         print(
@@ -1251,7 +1248,6 @@ class Controller:
             duration=5.0,
             retries=3,
             repeat=True,
-            repeat_template="你的需求是，{}",
             free_grammar=True,
         ).strip()
 
@@ -1276,7 +1272,7 @@ class Controller:
 
         """---注册主人---"""
         register_results = []
-        for i in range(1):
+        for i in range(3):
             result = self.register(i + 1)
             if result is not None:
                 register_results.append(result)
