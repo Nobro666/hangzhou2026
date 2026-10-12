@@ -486,13 +486,14 @@ class Detector:
         return 1
 
     def _register_three_front_faces(self, person_id, img_path, face):
-        """连续保存三张实时正脸照片，不要求主人左右转头。"""
+        """连续保存三张实时正脸照片"""
         self._save_front_face_for_registration(person_id, img_path, face)
         saved_face_count = 1
 
         for photo_index in range(2, 4):
             if self._capture_face_for_registration(
                 person_id,
+                f"采集第{photo_index}张照片",
                 prompt_callback=None,
                 settle_seconds=0.4,
             ):
@@ -553,11 +554,7 @@ class Detector:
         # )
 
         # 方案二：连续拍摄三张实时正脸（当前启用）。
-        saved_face_count = self._register_three_front_faces(
-            new_person_id,
-            img_path,
-            face
-        )
+        saved_face_count = self._register_three_front_faces(new_person_id, img_path, face)
         # ===== 2026-10-11 修改：连续采集三张正脸 END =====
 
         self.detect_result = new_person_id

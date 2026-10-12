@@ -972,10 +972,7 @@ class Controller:
             PERSON_AREA_MAX_Y,
         )
         if any(value is None for value in bounds):
-            rospy.logwarn_throttle(
-                5.0,
-                "人物有效区域参数尚未填写，忽略人物候选",
-            )
+            rospy.logwarn_throttle(5.0, "人物有效区域参数尚未填写，忽略人物候选")
             return False
 
         min_x, max_x, min_y, max_y = map(float, bounds)
@@ -985,18 +982,12 @@ class Controller:
         valid_min_y = min_y + margin
         valid_max_y = max_y - margin
         if valid_min_x >= valid_max_x or valid_min_y >= valid_max_y:
-            rospy.logerr_throttle(
-                5.0,
-                "人物有效区域参数无效，请检查最小值、最大值和边界余量",
-            )
+            rospy.logerr_throttle(5.0, "人物有效区域参数无效，请检查最小值、最大值和边界余量")
             return False
 
         person_x = float(map_coords[0])
         person_y = float(map_coords[1])
-        if not (
-            valid_min_x <= person_x <= valid_max_x
-            and valid_min_y <= person_y <= valid_max_y
-        ):
+        if not (valid_min_x <= person_x <= valid_max_x and valid_min_y <= person_y <= valid_max_y):
             print(
                 "忽略场外人物候选："
                 f"相机坐标={camera_coords}，地图坐标={map_coords}，"
