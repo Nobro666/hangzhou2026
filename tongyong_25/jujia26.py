@@ -91,11 +91,11 @@ ACTION_SIT = "坐下"
 ACTION_LIE = "躺下"
 ACTION_FALL = "摔倒"
 ACTION_WAVE = "挥手"
-ACTION_UNKNOWN = "未知行为"
+ACTION_UNKNOWN = "躺下"
 
-# 房间内分段旋转搜索参数：检测 4 个方向，每次左转 90°，完成一整圈。
-ROOM_SCAN_VIEW_COUNT = 4
-ROOM_SCAN_STEP_DEGREES = 90.0
+# 房间内分段旋转搜索参数：检测 3 个方向，每次左转 120°，完成一整圈。
+ROOM_SCAN_VIEW_COUNT = 3
+ROOM_SCAN_STEP_DEGREES = 120.0
 ROOM_SCAN_DETECT_TIMEOUT = 2.0
 ROOM_SCAN_TURN_TIMEOUT = 8.0
 ROOM_SCAN_SETTLE_SECONDS = 0.5
@@ -182,21 +182,13 @@ class Controller:
         self.voice = CompetitionVoiceService(owner_names=target_name, speaker=self.speak)
         print("==============语音初始化完成==============")
 
-        # 保存人脸 ID、主人编号和姓名
         self.person_info = {}
-        # 保存已经识别过的主人，避免重复处理
         self.recognized_owner_ids = set()
-        # 保存巡游识别结果
         self.owner_observations = {}
-        # 标记人物任务是否已经离开当前房间固定点位。没有检测到人物时
-        # 保持 False，垃圾搜索前不再向同一个房间点重复导航。
         self.person_navigation_started = False
-        # 保存通过地图区域检查的人物坐标，避免检测返回后重复转换。
         self.valid_person_map_coords = None
-        # 保存已完成投放的垃圾数量及记录。
         self.cleaned_trash_count = 0
         self.trash_observations = []
-        # 按开关机械臂按需初始化，避免主程序启动时重复等待Action Server。
         self.switch_arm = None
       
         self.publish_initial_pose()
