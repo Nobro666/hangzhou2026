@@ -676,7 +676,7 @@ class CompetitionVoiceService:
                     self.say(repeat_template.format(text), wait=True)
                 return text
 
-            if attempt < retries:
+            if attempt < retries and retry_prompt:
                 self.say(retry_prompt, wait=True)
 
         return last_text
@@ -700,7 +700,7 @@ class CompetitionVoiceService:
 
     def announce_behavior(self, behavior: str, person_name: Optional[str] = None):
         """识别姿态/行为后播报行为名称。"""
-        prefix = f"{person_name}的行为是" if person_name else "识别到的行为是"
+        prefix = f"行为是" if person_name else "行为是"
         self.say(f"{prefix}{behavior}", wait=True)
 
     def announce_trash_found(self, trash_name: str = "垃圾", location_desc: Optional[str] = None):
