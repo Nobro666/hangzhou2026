@@ -696,7 +696,7 @@ class CompetitionVoiceService:
         if owner_index is None:
             self.say(f"识别到主人，{person_name}", wait=True)
         else:
-            self.say(f"发现{person_name}", wait=False)
+            self.say(f"发现{person_name}", wait=True)
 
     def announce_behavior(self, behavior: str, person_name: Optional[str] = None):
         """识别姿态/行为后播报行为名称。"""

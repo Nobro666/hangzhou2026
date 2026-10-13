@@ -27,8 +27,17 @@
 需要明确的地方：
 问需求的人机交互问完还需不需要做别的
 
-注意：
+注意&TODO：
 到场地后除了打需要导航到的点外，还要在赛场的四个角落各打一个点，确认赛场范围
+更换模型路径，添加发现果皮
+记得把注册主人改回3个
+记得开关导航点取消注释 
+调整离场时间
+
+姿态识别需要调参
+机械臂根据实际位置调参：人体正上方；开关正上方；垃圾桶上方
+
+
 """
 
 
@@ -91,7 +100,7 @@ ACTION_SIT = "坐下"
 ACTION_LIE = "躺下"
 ACTION_FALL = "摔倒"
 ACTION_WAVE = "挥手"
-ACTION_UNKNOWN = "躺下"
+ACTION_UNKNOWN = "躺着"
 
 # 房间内分段旋转搜索参数：检测 3 个方向，每次左转 120°，完成一整圈。
 ROOM_SCAN_VIEW_COUNT = 3
@@ -659,11 +668,11 @@ class Controller:
         owner_result = self.recognize_owner()
         owner_recognized = owner_result is not None
         if not owner_recognized:
-            print(f"{room_name}中的人物不是已注册主人")
-            self.voice.say("没有识别出主人", wait=True)
+            print(f"{room_name}没有匹配到已注册主人，按张三继续后续流程")
             face_id = None
-            owner_index = None
-            person_name = "未知人物"
+            owner_index = 1
+            person_name = "张三"
+            self.voice.say("发现张三", wait=True)
         else:
             face_id = owner_result["face_id"]
             owner_index = owner_result["owner_index"]
@@ -782,9 +791,9 @@ class Controller:
         """统一播报并打印已确认的垃圾候选。"""
         found_name = trash_result["trash_name"]
         if found_name == "empty_bottle":
-            self.voice.say("发现空瓶", wait=False)
+            self.voice.say("发现空瓶", wait=True)
         elif found_name == "paper_ball":
-            self.voice.say("发现纸团", wait=False)
+            self.voice.say("发现纸团", wait=True)
         else:
             self.voice.announce_trash_found(found_name, room_name)
         print(
@@ -1259,7 +1268,7 @@ class Controller:
 
         """---注册主人---"""
         register_results = []
-        for i in range(1):
+        for i in range(3):
             result = self.register(i + 1)
             if result is not None:
                 register_results.append(result)
