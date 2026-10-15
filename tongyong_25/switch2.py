@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # coding: UTF-8
 
-"""单按钮开关的机械臂轨迹：home → 途经点 → 目标点 → home。"""
+"""单按钮开关的机械臂轨迹：home → 目标点 → home。"""
 
 import time
 import argparse
@@ -24,9 +24,8 @@ ARM_TIMEOUT_SEC = 60.0
 
 FINGER_CLOSE = [85, 85, 85]    # 全程闭合
 
-HOME_POSE = [0.2104809731245041, -0.25873029232025146, 0.5095799565315247, 81.040, 83.972, 11.606]  # TODO
+HOME_POSE = [0.2104809731245041, -0.25873029232025146, 0.5095799565315247, 81.040, 83.972, 11.606]
 
-SWITCH_WAYPOINT = [0.360364, -0.070202, 0.629747, -82.299, 59.369, 125.176]  # TODO 现场标定途经点
 SWITCH_TARGET = [0.495388, 0.024662, 0.877768, 74.187, 85.102, 42.378]  # TODO 核对目标点是否能实际触碰按钮
 
 STAY_SEC = 2.0                 # 终点停留时间
@@ -98,16 +97,16 @@ def _get_arm():
     return _arm
 
 
-def _go(waypoint, target):
-    """home → 途经点 → 终点。任一步失败返回 False。"""
+def _go(target):
+    """home → 终点。任一步失败返回 False。"""
     arm = _get_arm()
-    return arm.arm_run(HOME_POSE) and arm.arm_run(waypoint) and arm.arm_run(target)
+    return arm.arm_run(HOME_POSE) and arm.arm_run(target)
 
 
 def operate_switch():
     """沿原有单侧轨迹移动、停留并回到home。"""
     arm = _get_arm()
-    if not _go(SWITCH_WAYPOINT, SWITCH_TARGET):
+    if not _go(SWITCH_TARGET):
         rospy.logerr("[arm] 到达开关目标位置失败")
         return False
     rospy.loginfo("[arm] 到达开关目标位置，停留 %.1fs", STAY_SEC)
