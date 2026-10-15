@@ -31,10 +31,15 @@
 到场地后除了打需要导航到的点外，还要在赛场的四个角落各打一个点，确认赛场范围
 更换模型路径，添加发现果皮
 记得把注册主人改回3个
-记得开关导航点取消注释 
+记得填写 Switch0 和 switch2 的导航点坐标
 调整离场时间
+离场位置记得要同步填写在看门狗的文件开头
+猜测姓名根据实际名单修改
+开关位置两个房间两个，不区分开与关
+记得松急停！！！！！！！！！
 
 姿态识别需要调参
+语音识别
 机械臂根据实际位置调参：人体正上方；开关正上方；垃圾桶上方
 
 
@@ -84,13 +89,11 @@ LOCATION = {
     "room3_door":[[3.9969486212190874,-0.8500081702932526,0.138],[0.0,0.0,-0.5587124353962433,0.8293614498718872]],
     "room3":[[4.330788395935133,-1.8383054733246176,0.13800000000000004],[0.0,0.0,0.08057844734440155,0.9967482700379096]],
     "over":[[1.3805251010321327,0.150363578061142,0.13800000000000004],[0.0,0.0,0.13667084084624048,0.9906165157427881]],
-    "switch":[[5.476704518261456,0.5897450893812475,0.13799999999999996],[0.0,0.0,0.06216837191063609,0.9980656759622488]],
+    "Switch0": [],  # 客厅开关，现场填写导航点坐标
+    "switch2": [],  # 卧室开关，现场填写导航点坐标
     "trash_can":[[3.3662073600343705,-1.9891132444264676,0.138],[0.0,0.0,0.9992182243141545,0.03953403847911236]],
     "bed":[]
 }
-
-# 主人要求关键词
-target_keywords = ["开","关"]
 
 # 主人名字
 target_name = ["张三","李四","王五"]
@@ -198,7 +201,6 @@ class Controller:
         self.valid_person_map_coords = None
         self.cleaned_trash_count = 0
         self.trash_observations = []
-        self.switch_arm = None
       
         self.publish_initial_pose()
         time.sleep(1)
@@ -1151,7 +1153,7 @@ class Controller:
         person_name = observation["person_name"]
 
         if behavior == ACTION_SIT or behavior == ACTION_LIE:
-            return self.handle_switch_behavior(person_name)
+            return self.handle_switch_behavior(observation["room_name"])
         if behavior == ACTION_FALL:
             return self.handle_fall_behavior(person_name)
         if behavior == ACTION_WAVE:
@@ -1161,47 +1163,32 @@ class Controller:
         self.voice.say("暂时没有识别出你的行为", wait=False)
         return False
 
-    def handle_switch_behavior(self, person_name):
-        """主人坐下或躺下：询问需求、识别开关标记、执行机械臂动作。"""
-
-        # 1. 询问并识别开关需求
+    def handle_switch_behavior(self, room_name):
+        """坐下或躺下：前往所在房间的开关，操作唯一的按钮。"""
         if rospy.is_shutdown():
             return False
 
-        switch_command = self.voice.ask_raw_text(
-            prompt=f"{person_name}，请告诉我需要操作哪个开关",
-            duration=5.0,
-            retries=3,
-            repeat=True,
-            repeat_template="你的需求是，{}",
-            free_grammar=True,
-        ).strip()
+        switch_point = {"room0": "Switch0", "room2": "switch2"}.get(room_name)
+        if switch_point is None:
+            print(f"{room_name}不是客厅或卧室，没有对应开关导航点")
+            return False
+        if not self.location.get(switch_point):
+            print(f"尚未填写{switch_point}的导航点坐标")
+            return False
 
-        if not switch_command:
-            print("未获取到开关需求")
+        self.voice.say("需要操作哪个开关", wait=True)
+        time.sleep(2)
+        if rospy.is_shutdown():
             return False
-        # 优先匹配完整动词，不能只判断单个“开、关”。
-        if any(word in switch_command for word in ("关闭", "关掉", "关上", "关灯")):
-            switch_action = "close"
-        elif any(word in switch_command for word in ("打开", "开启", "开灯")):
-            switch_action = "open"
-        elif switch_command == "关":
-            switch_action = "close"
-        elif switch_command == "开":
-            switch_action = "open"
-        else:
-            print(f"无法判断开关需求：{switch_command}")
-            self.voice.say("没有听清需要打开还是关闭", wait=False)
-            return False
+        self.voice.say("好的", wait=True)
 
         try:
+            if not self.navigator.goto(switch_point):
+                print(f"无法到达开关导航点{switch_point}")
+                return False
             import switch as switch_controller
-            # self.navigator.goto("switch")
-            print(
-                f"开始执行开关动作："
-                f"{'打开' if switch_action == 'open' else '关闭'}"
-            )
-            success = switch_controller.go_to(switch_action)
+            print(f"已到达{switch_point}，开始执行按钮动作")
+            success = switch_controller.operate_switch()
             if success:
                 self.voice.say("开关操作已完成", wait=False)
             else:
