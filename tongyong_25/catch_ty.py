@@ -25,6 +25,13 @@ import std_msgs.msg
 import geometry_msgs.msg
 
 
+# 夹爪完全闭合约为 finger_maxTurn。抓到物体时，至少两根手指应在
+# 到达完全闭合位置前受到阻挡；该比例可根据现场反馈数据继续微调。
+GRASP_EMPTY_POSITION_RATIO = 0.985
+GRASP_REQUIRED_CONTACT_FINGERS = 2
+GRASP_FEEDBACK_TIMEOUT = 2.0
+
+
 class KinovaRobotGroud:
     """
         kinova 机械臂控制， 此程序中采用笛卡尔坐标进行控制机械臂
@@ -528,6 +535,50 @@ class KinovaRobotGroud:
             print("----ready to catch----")
             self.finger_run(finger_target=[75,75,75])
             self.finger_run(finger_target=[100,100,100])
+
+            # 不能仅以视觉检测和夹爪闭合指令成功作为抓取成功依据。
+            # 没抓到物体时三根手指会接近完全闭合；抓到物体时，至少
+            # 两根手指应在完全闭合前受到阻挡。
+            try:
+                finger_topic = (
+                    '/' + self.prefix +
+                    'driver/out/finger_position'
+                )
+                finger_feedback = rospy.wait_for_message(
+                    finger_topic,
+                    kinova_msgs.msg.FingerPosition,
+                    timeout=GRASP_FEEDBACK_TIMEOUT,
+                )
+                finger_positions = [
+                    float(finger_feedback.finger1),
+                    float(finger_feedback.finger2),
+                    float(finger_feedback.finger3),
+                ]
+                empty_threshold = (
+                    float(self.finger_maxTurn) *
+                    GRASP_EMPTY_POSITION_RATIO
+                )
+                contact_finger_count = sum(
+                    position < empty_threshold
+                    for position in finger_positions
+                )
+                print(
+                    "夹爪抓取确认："
+                    f"positions={finger_positions}，"
+                    f"empty_threshold={empty_threshold:.1f}，"
+                    f"contact_fingers={contact_finger_count}"
+                )
+
+                if contact_finger_count < GRASP_REQUIRED_CONTACT_FINGERS:
+                    print("夹爪接近完全闭合，判定未抓到垃圾")
+                    self.arm_run(pose_target=home_position)
+                    self.finger_run(finger_target=[5,5,5])
+                    return False
+            except Exception as error:
+                print(f"无法确认夹爪抓取状态，按抓取失败处理：{error}")
+                self.arm_run(pose_target=home_position)
+                return False
+
             self.arm_run(pose_target=home_position)
             return result
 
