@@ -90,6 +90,8 @@ DEFAULT_SWITCH_NUMBERS = ["一", "二", "三", "四", "五", "六", "1", "2", "3
 DEFAULT_SWITCH_ACTIONS = ["打开", "关闭", "开", "关", "开启", "关掉", "打开一下", "关闭一下"]
 DEFAULT_SWITCH_OBJECTS = ["开关", "电灯", "灯", "空调", "电视", "风扇", "插座", "电器"]
 DEFAULT_HELP_WORDS = ["帮忙", "帮助", "需要", "请问", "咨询", "拿", "取", "找", "开", "关"]
+WAVE_HELP_REQUESTS = ("喝水", "扔垃圾", "做饭", "换床单", "取衣服", "送快递")
+WAVE_HELP_PINYIN_MIN_SCORE = 0.80
 DEFAULT_TRASH_WORDS = ["垃圾", "纸团", "空瓶", "瓶子", "水果皮", "果皮", "废纸", "纸杯"]
 YES_WORDS = ["是", "对", "正确", "没错", "确认", "可以", "好", "好的"]
 NO_WORDS = ["不是", "不对", "错误", "否", "不要", "取消", "重新"]
@@ -512,6 +514,37 @@ class CompetitionVoiceParser:
         score += 0.10 if cmd.target else 0.0
         cmd.confidence = min(score, 1.0)
         return cmd
+
+    def match_wave_help_request(self, raw_text: str) -> Tuple[Optional[str], float]:
+        """按拼音将挥手需求匹配到六个标准说法。"""
+        normalized = normalize_text(raw_text)
+        if not normalized:
+            return None, 0.0
+
+        for request in WAVE_HELP_REQUESTS:
+            if request in normalized:
+                return request, 1.0
+
+        spoken_pinyin = text_to_pinyin_key(normalized)
+        best_request, best_score = None, 0.0
+        for request in WAVE_HELP_REQUESTS:
+            request_pinyin = text_to_pinyin_key(request)
+            if not request_pinyin:
+                continue
+            width = len(request_pinyin)
+            candidates = [spoken_pinyin]
+            if len(spoken_pinyin) > width:
+                candidates.extend(
+                    spoken_pinyin[index:index + width]
+                    for index in range(len(spoken_pinyin) - width + 1)
+                )
+            score = max(similarity_ratio(candidate, request_pinyin) for candidate in candidates)
+            if score > best_score:
+                best_request, best_score = request, score
+
+        if best_score >= WAVE_HELP_PINYIN_MIN_SCORE:
+            return best_request, best_score
+        return None, best_score
 
     def parse_help_request(self, text: str) -> HelpRequest:
         """挥手主人咨询需求。赛规只要求中文语音交互并播报，默认保留原话。"""

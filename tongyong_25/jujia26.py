@@ -1062,25 +1062,27 @@ class Controller:
 
 
     def handle_wave_behavior(self, person_name):
-        """主人挥手：询问需求、识别中文语音并复述。"""
+        """主人挥手：拼音匹配六种需求，只复述，不执行对应任务。"""
 
         if rospy.is_shutdown():
             return False
 
-        request_text = self.voice.ask_raw_text(
-            prompt=f"{person_name}，请告诉我你的需求",
-            duration=5.0,
-            retries=3,
-            repeat=True,
-            free_grammar=True,
-        ).strip()
+        for attempt in range(1, 4):
+            request_text = self.voice.ask_raw_text(
+                prompt=f"{person_name}，请问需要什么帮助？",
+                duration=5.0,
+                retries=1,
+                repeat=False,
+                free_grammar=True,
+            ).strip()
+            request, score = self.voice.parser.match_wave_help_request(request_text)
+            print(f"挥手需求第 {attempt}/3 次：原文={request_text!r}，匹配={request}，分数={score:.2f}")
+            if request:
+                self.voice.say(f"好的，{request}", wait=True)
+                return True
 
-        if not request_text:
-            print("连续三次未识别到主人需求")
-            return False
-
-        print(f"主人需求原文：{request_text}")
-        return True
+        print("连续三次未匹配到六种挥手需求")
+        return False
 
 
 
