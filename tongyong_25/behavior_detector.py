@@ -74,8 +74,8 @@ JOINT = {
 # 如果来不及做多点标定，可保持 USE_GROUND_Y_BY_Z=False，只用单点 GROUND_Y；
 # 但人离相机远近变化较大时，“躺下睡觉/摔倒”区分会变差。
 USE_GROUND_Y_BY_Z = True
-GROUND_Y_BY_Z_A = -0.32719578 # 多点标定后填写：ground_y = a * z + b 中的 a
-GROUND_Y_BY_Z_B = 1281.368   # 多点标定后填写：ground_y = a * z + b 中的 b
+GROUND_Y_BY_Z_A = -0.33302643 # 多点标定后填写：ground_y = a * z + b 中的 a
+GROUND_Y_BY_Z_B = 1279.978   # 多点标定后填写：ground_y = a * z + b 中的 b
 
 # 单点地面 Y(mm)：USE_GROUND_Y_BY_Z=False 时使用。
 # 简易标定：人站直，左右脚踝 Y 的平均值约等于当前位置地面 Y。

@@ -10,14 +10,16 @@
 """
 
 
-import roslib; roslib.load_manifest('kinova_demo')
-import rospy
+
 import numpy as np
 import math
 import time
 from pathlib import Path
 
 from realsense_yolo11 import RealSenseYolo11Detector
+
+import roslib; roslib.load_manifest('kinova_demo')
+import rospy
 
 import actionlib
 import kinova_msgs.msg
