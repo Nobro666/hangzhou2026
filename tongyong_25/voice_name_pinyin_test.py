@@ -142,7 +142,7 @@ def run_live_rounds(names: List[str], duration: float, rounds: int):
 
 def main():
     parser = argparse.ArgumentParser(description="循环测试姓名拼音容错匹配")
-    parser.add_argument("--names", nargs="+", default=["张三", "李四", "王五"], help="候选主人姓名列表")
+    parser.add_argument("--names", nargs="+", default=["杰克", "安东", "李华"], help="候选主人姓名列表")
     parser.add_argument("--rounds", type=int, default=5, help="实机测试轮数，默认 5")
     parser.add_argument("--duration", type=float, default=5.0, help="每轮录音时长")
     parser.add_argument("--score", type=float, default=None, help="拼音匹配阈值，对应 ROBO_NAME_PINYIN_MIN_SCORE")

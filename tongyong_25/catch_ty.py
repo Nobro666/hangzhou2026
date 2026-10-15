@@ -482,7 +482,8 @@ class KinovaRobotGroud:
         print("-----到达检测位-----")
         self.arm_run(pose_target=position_down)
 
-    def catch_ground(self, weights_path=None, target_items=None):
+    def catch_ground(self, weights_path=None, target_items=None,
+                     on_detected=None):
         # 误差
         x_down = 0.633305
         y_down = -0.195270
@@ -507,6 +508,13 @@ class KinovaRobotGroud:
             print("------识别成功------")
             print(f"坐标:X={result.x:.3f}, Y={result.y:.3f}, Z={result.z:.3f}")
             print(f"角度：{result.angle:.1f}°")
+
+            # 识别成功后、开始夹爪和机械臂抓取前通知主流程播报。
+            if on_detected is not None:
+                try:
+                    on_detected(result.name)
+                except Exception as error:
+                    rospy.logwarn("垃圾识别播报失败，继续抓取：%s", error)
             
             # self.finger_run(finger_target=[5,5,5])
             print("DEBUG: 准备执行 finger_run")

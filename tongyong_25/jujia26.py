@@ -650,21 +650,23 @@ class Controller:
             # 固定站位只确定机械臂工作位置；物品类别及精确位置由RealSense确认。
             from catch_ty import KinovaRobotGroud
 
+            def announce_detected_trash(trash_name):
+                if trash_name == "empty_bottle":
+                    self.voice.say("发现空瓶", wait=True)
+                elif trash_name == "paper_ball":
+                    self.voice.say("发现纸团", wait=True)
+
             grasp_result = KinovaRobotGroud.catch_ground(
                 self.kinova,
                 weights_path=TRASH_MODEL_PATH,
                 target_items=TRASH_TARGET_CLASSES,
+                on_detected=announce_detected_trash,
             )
             if not grasp_result:
                 print(f"{trash_point}未检测到可抓取垃圾或抓取失败")
                 return None
 
             trash_name = grasp_result.name
-            if trash_name == "empty_bottle":
-                self.voice.say("发现空瓶", wait=True)
-            elif trash_name == "paper_ball":
-                self.voice.say("发现纸团", wait=True)
-
             if not self.navigator.goto("trash_can"):
                 print("已执行垃圾抓取，但无法到达垃圾桶")
                 return None
