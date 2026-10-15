@@ -457,11 +457,12 @@ class Controller:
         """
         巡游四个房间。
 
-        先在每个房间的门口朝预设方向各检测一次人物和垃圾；
-        门口同时看到人物和垃圾时保存两组坐标，按距离由近到远
+        先在每个房间的门口朝预设方向检测人物和垃圾；
+        客厅已确定没有垃圾，只执行人物检测与搜索。
+        其余房间门口同时看到人物和垃圾时保存两组坐标，按距离由近到远
         依次处理。只看到一项时，先处理该项，再进入房间完成
         另一项任务；两者都没有时，进入房间完成两项任务。
-        房间内保留原有的4方向分段旋转搜索。
+        房间内仍按需进行4方向分段旋转搜索。
         """
         self.voice.say("开始巡游房间", wait=True)
         room_results = []
@@ -474,6 +475,7 @@ class Controller:
 
         for room_index in range(4):
             room_name = "room" + str(room_index)
+            needs_trash = room_name != "room0"
             print("--------------------------------")
             print(f">>> 正在巡游房间：{room_name}")
             print("--------------------------------")
@@ -533,13 +535,15 @@ class Controller:
                     print("三位主人任务和三个垃圾任务均已完成")
                     break
 
-            if door_person_done and door_trash_done:
-                print(f"{door_name}已完成人物和垃圾任务，进入下一个房间")
+            if door_person_done and (door_trash_done or not needs_trash):
+                print(f"{door_name}已完成当前房间任务，进入下一个房间")
                 continue
             if door_person_done:
                 print(f"{door_name}已完成人物任务，进入{room_name}搜索垃圾")
             elif door_trash_done:
                 print(f"{door_name}已完成垃圾任务，进入{room_name}搜索人物")
+            elif not needs_trash:
+                print(f"{door_name}未找到人物，进入{room_name}继续搜索人物")
             else:
                 print(f"{door_name}未完成任务，进入{room_name}搜索人物和垃圾")
             if not self.navigator.goto(room_name):
@@ -554,7 +558,7 @@ class Controller:
                 if observation is not None:
                     room_results.append(observation)
 
-            if not door_trash_done:
+            if needs_trash and not door_trash_done:
                 # 门口已完成人物任务时，机器人已重新导航到房间点，
                 # 只需执行垃圾搜索。只有在房间内接近人物后才再次返回。
                 if interior_person_attempted and self.person_navigation_started:
@@ -577,13 +581,13 @@ class Controller:
 
 
     def find_targets_at_door(self, room_name, door_name):
-        """在房间门口的预设朝向检测一次人物和垃圾。"""
+        """在房间门口检测人物；非客厅房间同时检测垃圾。"""
         person_result = None
         trash_result = None
         self.valid_person_map_coords = None
 
         try:
-            if self.items_detector is None:
+            if room_name != "room0" and self.items_detector is None:
                 self.items_detector = ItemsDetector(model_path=TRASH_MODEL_PATH)
             self.camera.open_camera()
 
@@ -608,35 +612,36 @@ class Controller:
                     "distance": person_distance,
                 }
 
-            print(f"{door_name}单方向快速检测垃圾")
-            trash_name, trash_coords, trash_confidence = (
-                self.items_detector.detect_targets(
-                    self.camera,
-                    target_items=TRASH_TARGET_CLASSES,
-                    max_distance=TRASH_SCAN_MAX_DISTANCE,
-                    timeout=DOOR_SCAN_DETECT_TIMEOUT,
-                    return_confidence=True,
-                )
-            )
-            if trash_name is not None:
-                trash_map_coords = self.transpoint.get_map_coords(trash_coords)
-                if trash_map_coords is None:
-                    print(f"{door_name}的{trash_name}坐标转换失败")
-                elif not (TRASH_MAP_MIN_HEIGHT <= trash_map_coords[2] <= TRASH_MAP_MAX_HEIGHT):
-                    print(
-                        f"忽略{door_name}的{trash_name}候选："
-                        f"地图高度{trash_map_coords[2]:.3f}m不在地面范围内"
+            if room_name != "room0":
+                print(f"{door_name}单方向快速检测垃圾")
+                trash_name, trash_coords, trash_confidence = (
+                    self.items_detector.detect_targets(
+                        self.camera,
+                        target_items=TRASH_TARGET_CLASSES,
+                        max_distance=TRASH_SCAN_MAX_DISTANCE,
+                        timeout=DOOR_SCAN_DETECT_TIMEOUT,
+                        return_confidence=True,
                     )
-                else:
-                    trash_distance = sum(float(value) ** 2 for value in trash_coords) ** 0.5
-                    trash_result = {
-                        "room_name": room_name,
-                        "trash_name": trash_name,
-                        "camera_coords": trash_coords,
-                        "map_coords": trash_map_coords,
-                        "confidence": trash_confidence,
-                        "distance": trash_distance,
-                    }
+                )
+                if trash_name is not None:
+                    trash_map_coords = self.transpoint.get_map_coords(trash_coords)
+                    if trash_map_coords is None:
+                        print(f"{door_name}的{trash_name}坐标转换失败")
+                    elif not (TRASH_MAP_MIN_HEIGHT <= trash_map_coords[2] <= TRASH_MAP_MAX_HEIGHT):
+                        print(
+                            f"忽略{door_name}的{trash_name}候选："
+                            f"地图高度{trash_map_coords[2]:.3f}m不在地面范围内"
+                        )
+                    else:
+                        trash_distance = sum(float(value) ** 2 for value in trash_coords) ** 0.5
+                        trash_result = {
+                            "room_name": room_name,
+                            "trash_name": trash_name,
+                            "camera_coords": trash_coords,
+                            "map_coords": trash_map_coords,
+                            "confidence": trash_confidence,
+                            "distance": trash_distance,
+                        }
         except Exception as error:
             print(f"{door_name}门口快速检测发生异常：{error}")
         finally:
@@ -833,24 +838,22 @@ class Controller:
                             f"{room_name}的{target_name}候选坐标转换失败，"
                             "继续扫描"
                         )
-                        continue
-
-                    candidate_height = candidate_map_coords[2]
-                    if not (
-                        TRASH_MAP_MIN_HEIGHT <= candidate_height <=
-                        TRASH_MAP_MAX_HEIGHT
-                    ):
-                        print(
-                            f"忽略{room_name}的{target_name}候选："
-                            f"地图高度{candidate_height:.3f}m不在地面范围"
-                            f"[{TRASH_MAP_MIN_HEIGHT:.2f}, "
-                            f"{TRASH_MAP_MAX_HEIGHT:.2f}]m内"
-                        )
-                        continue
-
-                    found_name = target_name
-                    camera_coords = coords
-                    map_coords = candidate_map_coords
+                    else:
+                        candidate_height = candidate_map_coords[2]
+                        if not (
+                            TRASH_MAP_MIN_HEIGHT <= candidate_height <=
+                            TRASH_MAP_MAX_HEIGHT
+                        ):
+                            print(
+                                f"忽略{room_name}的{target_name}候选："
+                                f"地图高度{candidate_height:.3f}m不在地面范围"
+                                f"[{TRASH_MAP_MIN_HEIGHT:.2f}, "
+                                f"{TRASH_MAP_MAX_HEIGHT:.2f}]m内"
+                            )
+                        else:
+                            found_name = target_name
+                            camera_coords = coords
+                            map_coords = candidate_map_coords
                 if found_name is not None:
                     break
 
@@ -1166,7 +1169,7 @@ class Controller:
         if rospy.is_shutdown():
             return False
 
-        switch_point = {"room0": "Switch0", "room2": "switch2"}.get(room_name)
+        switch_point = {"room0": "switch0", "room2": "switch2"}.get(room_name)
         if switch_point is None:
             print(f"{room_name}不是客厅或卧室，没有对应开关导航点")
             return False
