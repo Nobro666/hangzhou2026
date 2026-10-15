@@ -1175,7 +1175,7 @@ class Controller:
             return False
 
         self.voice.say("需要操作哪个开关", wait=True)
-        time.sleep(2)
+        time.sleep(1)
         if rospy.is_shutdown():
             return False
         self.voice.say("好的", wait=True)
