@@ -1,24 +1,7 @@
 #!/usr/bin/env python3
 # coding: UTF-8
 
-"""
-xg_arm_waypoints.py —— 机械臂运动到"开/关"检测位置正上方并停留
-
-对外接口：
-    go_open_position()    # home → 开途经点 → 开终点 → 停2s → home
-    go_close_position()   # home → 关途经点 → 关终点 → 停2s → home
-    go_to(detect)         # 统一入口：detect='open' 或 'close'
-
-说明：
-    - "开"和"关"是两个检测位置，与夹爪无关
-    - 夹爪全程闭合（初始化时合一次）
-    - 每个动作走 4 个点：home → 途经点 → 终点 → home
-    - kinova_robot.launch 只挂 server，不合爪、不回 home，故首次合爪必须自己做
-
-运行：
-    python3 xg_arm_waypoints.py --open
-    python3 xg_arm_waypoints.py --close
-"""
+"""单按钮开关的机械臂轨迹：home → 途经点 → 目标点 → home。"""
 
 import time
 import argparse
@@ -43,11 +26,8 @@ FINGER_CLOSE = [85, 85, 85]    # 全程闭合
 
 HOME_POSE = [0.2104809731245041, -0.25873029232025146, 0.5095799565315247, 81.040, 83.972, 11.606]  # TODO
 
-OPEN_WAYPOINT = [0.360364, -0.070202, 0.629747, -82.299, 59.369, 125.176]   # TODO 开-途经点
-OPEN_TARGET   = [-0.114738, -0.365686, 0.762665, 83.859, 28.168, -69.590]   # TODO 开-终点正上方
-
-CLOSE_WAYPOINT = [0.360364, -0.070202, 0.629747, -82.299, 59.369, 125.176]  # TODO 关-途经点
-CLOSE_TARGET   = [-0.114738, -0.365686, 0.762665, 83.859, 28.168, -69.590]  # TODO 关-终点正上方
+SWITCH_WAYPOINT = [0.360364, -0.070202, 0.629747, -82.299, 59.369, 125.176]  # TODO 现场标定途经点
+SWITCH_TARGET = [-0.114738, -0.365686, 0.762665, 83.859, 28.168, -69.590]  # TODO 核对目标点是否能实际触碰按钮
 
 STAY_SEC = 2.0                 # 终点停留时间
 
@@ -124,33 +104,15 @@ def _go(waypoint, target):
     return arm.arm_run(HOME_POSE) and arm.arm_run(waypoint) and arm.arm_run(target)
 
 
-def go_open_position():
-    """home → 开途经点 → 开终点正上方 → 停2s → home。"""
+def operate_switch():
+    """沿原有单侧轨迹移动、停留并回到home。"""
     arm = _get_arm()
-    if not _go(OPEN_WAYPOINT, OPEN_TARGET):
-        rospy.logerr("[arm] 去开位置失败")
+    if not _go(SWITCH_WAYPOINT, SWITCH_TARGET):
+        rospy.logerr("[arm] 到达开关目标位置失败")
         return False
-    rospy.loginfo("[arm] 到达开位置正上方，停留 %.1fs", STAY_SEC)
+    rospy.loginfo("[arm] 到达开关目标位置，停留 %.1fs", STAY_SEC)
     time.sleep(STAY_SEC)
-    arm.arm_run(HOME_POSE)
-    return True
-
-
-def go_close_position():
-    """home → 关途经点 → 关终点正上方 → 停2s → home。"""
-    arm = _get_arm()
-    if not _go(CLOSE_WAYPOINT, CLOSE_TARGET):
-        rospy.logerr("[arm] 去关位置失败")
-        return False
-    rospy.loginfo("[arm] 到达关位置正上方，停留 %.1fs", STAY_SEC)
-    time.sleep(STAY_SEC)
-    arm.arm_run(HOME_POSE)
-    return True
-
-
-def go_to(detect):
-    """统一入口：detect='open' 或 'close'。"""
-    return go_open_position() if detect == 'open' else go_close_position()
+    return arm.arm_run(HOME_POSE)
 
 
 # =============================================================================
@@ -158,18 +120,15 @@ def go_to(detect):
 # =============================================================================
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--open', action='store_true')
-    parser.add_argument('--close', action='store_true')
+    parser.add_argument('--press', action='store_true')
     args = parser.parse_args()
 
     rospy.init_node('waypoint_arm', anonymous=True)
 
-    if args.open:
-        go_open_position()
-    elif args.close:
-        go_close_position()
+    if args.press:
+        operate_switch()
     else:
-        rospy.loginfo("用法: --open 或 --close")
+        rospy.loginfo("用法: --press")
 
 
 if __name__ == '__main__':
