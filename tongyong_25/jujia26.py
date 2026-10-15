@@ -16,10 +16,10 @@
 优化思路：
 
 地图范围过滤，人的坐标必须在场地坐标范围内
-先在门口找一遍人和垃圾，先处理距离较近者，
-再进入房间内部完成剩余任务
+先在门口找人；没有找到时进入房间内搜索。
+垃圾前往固定抓取站位，由RealSense确认并抓取。
 
-只有摔倒后的人机交互保留第二次靠近
+摔倒和挥手的人机交互需要第二次靠近
 底盘速度调快
 未知人物未知动作随便蒙一个
 添加超时直接自主离场，确保能拿到自主离场的分数
@@ -65,10 +65,7 @@ import datetime
 import argparse
 import time
 from catch_ground.src.catch import KinovaRobot
-from catch_ground.src.realsense_yolo11 import RealSenseYolo11Detector
 from detect_people import KinectCamera, PersonDetector
-# from catch_ground.src.detector_items import ItemsDetector
-from catch_ground.src.detector_items_c import ItemsDetector
 from camera_to_map import CoordinateConverter
 from position_last_second import SmartGoalFinder
 # from face_detect import Detector #单人版
@@ -124,6 +121,20 @@ ROOM_DOOR_POINTS = {
 }
 DOOR_SCAN_DETECT_TIMEOUT = 2.0
 
+ROOM_DISPLAY_NAMES = {
+    "room0": "客厅",
+    "room1": "厨房",
+    "room2": "卧室",
+    "room3": "餐厅",
+}
+
+# 各房间垃圾点是机器人可直接到达的抓取站位，不是垃圾本身的坐标。
+ROOM_TRASH_POINTS = {
+    "room1": "trash_1",
+    "room2": "trash_2",
+    "room3": "trash_3",
+}
+
 # 人物有效区域（map坐标系，单位：米）。
 # TODO：根据当前比赛地图填写矩形区域的最小/最大X、Y坐标。
 # 参数未填写或范围无效时，人物候选会被拒绝并在终端提示。
@@ -144,24 +155,14 @@ OWNER_GOAL_MIN_RADIUS = 1.4
 OWNER_CLOSE_MAX_RADIUS = 1.0
 OWNER_CLOSE_MIN_RADIUS = 0.6
 
-# 垃圾抓取导航距离
-TRASH_GOAL_MAX_RADIUS = 0.6
-TRASH_GOAL_MIN_RADIUS = 0.4
-
 # Azure Kinect Body Tracking动态库及行为识别采样帧数。
 # 可通过环境变量覆盖动态库路径，便于不同机器人部署。
 BEHAVIOR_K4ABT_LIB_PATH = os.environ.get("K4ABT_LIB_PATH","/lib/libk4abt.so")
 BEHAVIOR_RECOGNIZE_FRAMES = 20
 
-# 垃圾粗定位类别。应与Kinect检测模型和catch_ty.py中的RealSense
-# 垃圾模型类别保持一致。
+# 固定站位抓取时由RealSense检测的目标类别。
 TRASH_TARGET_CLASSES = ["empty_bottle", "paper_ball"]
 TRASH_TARGET_COUNT = 3
-TRASH_SCAN_MAX_DISTANCE = 5.0
-# 地图坐标系中地面垃圾允许的高度范围。超出范围的候选继续扫描，
-# 不再生成导航目标；用于过滤桌椅、人体或背景上的误检。
-TRASH_MAP_MIN_HEIGHT = -0.15
-TRASH_MAP_MAX_HEIGHT = 0.45
 TRASH_MODEL_PATH = os.environ.get(
     "TRASH_MODEL_PATH",
     "/home/zq/catkin_ws/src/cmoon/src/hangzhou2026/tongyong_25/model/best5.pt",
@@ -187,8 +188,6 @@ class Controller:
         # self.detector = RealSenseYolo11Detector(weights=Path("/home/zq/catkin_ws/src/cmoon/src/hangzhou2026/tongyong_25/model/yolo11m.pt"))
         self.camera = KinectCamera()
         self.people_detector = PersonDetector()
-        # 垃圾模型按需加载，避免启动主程序时占用额外显存。
-        self.items_detector = None
         self.photo_path = '/home/zq/catkin_ws/src/cmoon/src/hangzhou2026/tongyong_25/face'  # 替换为你想要保存照片的路径
         self.face = Detector(self.photo_path)
         print("==============视觉初始化完成==============")
@@ -200,7 +199,6 @@ class Controller:
         self.person_info = {}
         self.recognized_owner_ids = set()
         self.owner_observations = {}
-        self.person_navigation_started = False
         self.valid_person_map_coords = None
         self.cleaned_trash_count = 0
         self.trash_observations = []
@@ -458,14 +456,8 @@ class Controller:
 
     def find_room(self):
         """
-        巡游四个房间。
-
-        先在每个房间的门口朝预设方向检测人物和垃圾；
-        客厅已确定没有垃圾，只执行人物检测与搜索。
-        其余房间门口同时看到人物和垃圾时保存两组坐标，按距离由近到远
-        依次处理。只看到一项时，先处理该项，再进入房间完成
-        另一项任务；两者都没有时，进入房间完成两项任务。
-        房间内仍按需进行4方向分段旋转搜索。
+        巡游四个房间：门口先找人，未找到再进入房间搜索；
+        厨房、卧室、餐厅各前往一个固定站位抓取垃圾。
         """
         self.voice.say("开始巡游房间", wait=True)
         room_results = []
@@ -478,15 +470,12 @@ class Controller:
 
         for room_index in range(4):
             room_name = "room" + str(room_index)
-            needs_trash = room_name != "room0"
             print("--------------------------------")
             print(f">>> 正在巡游房间：{room_name}")
             print("--------------------------------")
 
             door_name = ROOM_DOOR_POINTS[room_name]
             door_scan_available = True
-            door_person_done = False
-            door_trash_done = False
             if room_name == "room0":
                 # 主人注册在start点完成，此时不重复导航。
                 print("room0使用当前start点进行门口检测")
@@ -495,83 +484,30 @@ class Controller:
                     print(f"无法到达{door_name}，尝试直接进入{room_name}")
                     door_scan_available = False
 
+            observation = None
             if door_scan_available:
-                person_candidate, trash_candidate = (self.find_targets_at_door(room_name, door_name))
-                door_candidates = []
+                person_candidate = self.find_targets_at_door(room_name, door_name)
                 if person_candidate is not None:
-                    door_candidates.append(("person", person_candidate["distance"], person_candidate))
-                if trash_candidate is not None:
-                    door_candidates.append(("trash", trash_candidate["distance"], trash_candidate))
-
-                # 两者距离相同时垃圾优先
-                door_candidates.sort(key=lambda item: (item[1], 0 if item[0] == "trash" else 1))
-                if door_candidates:
-                    order_text = " -> ".join(
-                        f"{'人物' if kind == 'person' else '垃圾'}"
-                        f"({distance:.2f}m)"
-                        for kind, distance, _ in door_candidates
+                    print(
+                        f"{door_name}处理人物候选，"
+                        f"距离={person_candidate['distance']:.2f}m，"
+                        f"置信度={person_candidate['confidence']:.2f}"
                     )
-                    print(f"{door_name}按距离处理顺序：{order_text}")
+                    observation = self.people_room(room_name, person_result=person_candidate)
+                    if observation is not None:
+                        room_results.append(observation)
 
-                for candidate_kind, candidate_distance, candidate in door_candidates:
-                    if candidate_kind == "person":
-                        print(
-                            f"{door_name}处理人物候选，"
-                            f"距离={candidate_distance:.2f}m，"
-                            f"置信度={candidate['confidence']:.2f}"
-                        )
-                        observation = self.people_room(room_name,person_result=candidate)
-                        if observation is not None:
-                            room_results.append(observation)
-                            door_person_done = True
-                    else:
-                        print(
-                            f"{door_name}处理垃圾候选，"
-                            f"距离={candidate_distance:.2f}m，"
-                            f"置信度={candidate['confidence']:.2f}"
-                        )
-                        trash_result = self.trash_room(room_name,trash_result=candidate)
-                        door_trash_done = trash_result is not None
-
-                if (len(self.recognized_owner_ids) >= 3 and
-                        self.cleaned_trash_count >= TRASH_TARGET_COUNT):
-                    print("三位主人任务和三个垃圾任务均已完成")
-                    break
-
-            if door_person_done and (door_trash_done or not needs_trash):
-                print(f"{door_name}已完成当前房间任务，进入下一个房间")
-                continue
-            if door_person_done:
-                print(f"{door_name}已完成人物任务，进入{room_name}搜索垃圾")
-            elif door_trash_done:
-                print(f"{door_name}已完成垃圾任务，进入{room_name}搜索人物")
-            elif not needs_trash:
-                print(f"{door_name}未找到人物，进入{room_name}继续搜索人物")
-            else:
-                print(f"{door_name}未完成任务，进入{room_name}搜索人物和垃圾")
-            if not self.navigator.goto(room_name):
-                print(f"无法到达{room_name}，跳过该房间")
-                continue
-            self.voice.say(room_arrival_speech[room_name], wait=False)
-
-            interior_person_attempted = False
-            if not door_person_done:
-                interior_person_attempted = True
-                observation = self.people_room(room_name)
+            if observation is None:
+                print(f"{door_name}未完成人物任务，进入{room_name}继续搜索")
+                if self.navigator.goto(room_name):
+                    self.voice.say(room_arrival_speech[room_name], wait=False)
+                    observation = self.people_room(room_name)
+                else:
+                    print(f"无法到达{room_name}，跳过房间内的人物搜索")
                 if observation is not None:
                     room_results.append(observation)
 
-            if needs_trash and not door_trash_done:
-                # 门口已完成人物任务时，机器人已重新导航到房间点，
-                # 只需执行垃圾搜索。只有在房间内接近人物后才再次返回。
-                if interior_person_attempted and self.person_navigation_started:
-                    print(f"人物任务结束，返回{room_name}点位后再搜索垃圾")
-                    if not self.navigator.goto(room_name):
-                        print(f"无法返回{room_name}点位，跳过该房间的垃圾搜索")
-                        continue
-                elif interior_person_attempted:
-                    print(f"{room_name}未接近人物，直接开始垃圾搜索")
-
+            if room_name in ROOM_TRASH_POINTS:
                 self.trash_room(room_name)
 
             if (len(self.recognized_owner_ids) >= 3 and self.cleaned_trash_count >= TRASH_TARGET_COUNT):
@@ -584,14 +520,11 @@ class Controller:
 
 
     def find_targets_at_door(self, room_name, door_name):
-        """在房间门口检测人物；非客厅房间同时检测垃圾。"""
+        """在房间门口的预设朝向检测一次人物。"""
         person_result = None
-        trash_result = None
         self.valid_person_map_coords = None
 
         try:
-            if room_name != "room0" and self.items_detector is None:
-                self.items_detector = ItemsDetector(model_path=TRASH_MODEL_PATH)
             self.camera.open_camera()
 
             print(f"{door_name}单方向快速检测人物")
@@ -614,37 +547,6 @@ class Controller:
                     "confidence": person_confidence,
                     "distance": person_distance,
                 }
-
-            if room_name != "room0":
-                print(f"{door_name}单方向快速检测垃圾")
-                trash_name, trash_coords, trash_confidence = (
-                    self.items_detector.detect_targets(
-                        self.camera,
-                        target_items=TRASH_TARGET_CLASSES,
-                        max_distance=TRASH_SCAN_MAX_DISTANCE,
-                        timeout=DOOR_SCAN_DETECT_TIMEOUT,
-                        return_confidence=True,
-                    )
-                )
-                if trash_name is not None:
-                    trash_map_coords = self.transpoint.get_map_coords(trash_coords)
-                    if trash_map_coords is None:
-                        print(f"{door_name}的{trash_name}坐标转换失败")
-                    elif not (TRASH_MAP_MIN_HEIGHT <= trash_map_coords[2] <= TRASH_MAP_MAX_HEIGHT):
-                        print(
-                            f"忽略{door_name}的{trash_name}候选："
-                            f"地图高度{trash_map_coords[2]:.3f}m不在地面范围内"
-                        )
-                    else:
-                        trash_distance = sum(float(value) ** 2 for value in trash_coords) ** 0.5
-                        trash_result = {
-                            "room_name": room_name,
-                            "trash_name": trash_name,
-                            "camera_coords": trash_coords,
-                            "map_coords": trash_map_coords,
-                            "confidence": trash_confidence,
-                            "distance": trash_distance,
-                        }
         except Exception as error:
             print(f"{door_name}门口快速检测发生异常：{error}")
         finally:
@@ -654,21 +556,17 @@ class Controller:
                 pass
             cv2.destroyAllWindows()
 
-        return person_result, trash_result
+        return person_result
 
 
     def people_room(self, room_name, person_result=None):
         """执行当前房间的人物搜索、身份/行为识别和人机交互。"""
-        self.person_navigation_started = False
         if person_result is None:
             person_result = self.find_owner_in_room(room_name)
         if person_result is None:
             print(f"{room_name}中没有找到主人")
             return None
 
-        # 从这里开始可能已经偏离房间固定点；即使接近导航中途失败，
-        # 垃圾搜索前也应重新回到房间点位。
-        self.person_navigation_started = True
         if not self.approach_owner(person_result["map_coords"]):
             print(f"无法接近{room_name}中的人物")
             return None
@@ -676,11 +574,11 @@ class Controller:
         owner_result = self.recognize_owner()
         owner_recognized = owner_result is not None
         if not owner_recognized:
-            print(f"{room_name}没有匹配到已注册主人，按张三继续后续流程")
+            print(f"{room_name}没有匹配到已注册主人，按杰克继续后续流程")
             face_id = None
             owner_index = 1
-            person_name = "张三"
-            self.voice.say("发现张三", wait=True)
+            person_name = "杰克"
+            self.voice.say("发现杰克", wait=True)
         else:
             face_id = owner_result["face_id"]
             owner_index = owner_result["owner_index"]
@@ -691,7 +589,10 @@ class Controller:
             self.voice.announce_owner_recognized(person_name, owner_index)
 
         behavior = self.recognize_behavior(face_id, person_name)
-        self.voice.announce_behavior(behavior, person_name)
+        self.voice.say(
+            f"{person_name}在{ROOM_DISPLAY_NAMES[room_name]}{behavior}",
+            wait=True,
+        )
 
         observation = {
             "room_name": room_name,
@@ -705,11 +606,10 @@ class Controller:
         observation_key = (face_id if face_id is not None else f"unknown_{room_name}")
 
         # 人脸和姿态识别均在第一次靠近的距离完成。
-        # 只有摔倒救助动作需要在交互前第二次靠近主人；
-        # 坐下、躺下和挥手直接在当前位置执行交互。
-        if behavior == ACTION_FALL:
+        # 摔倒救助和挥手问需求前需要第二次靠近；坐下、躺下无需靠近。
+        if behavior in (ACTION_FALL, ACTION_WAVE):
             if not self.approach_owner_closer(person_result["map_coords"]):
-                print(f"无法进一步接近{room_name}中摔倒的主人，取消救助交互")
+                print(f"无法进一步接近{room_name}中的主人，取消{behavior}交互")
                 observation["interaction_success"] = False
                 self.owner_observations[observation_key] = observation
                 return observation
@@ -731,47 +631,39 @@ class Controller:
         return observation
 
 
-    def trash_room(self, room_name, trash_result=None):
-        """Kinect粗定位当前房间垃圾，接近后用RealSense抓取并投放。"""
+    def trash_room(self, room_name):
+        """前往当前房间的固定抓取站位，用RealSense确认、抓取并投放垃圾。"""
         if self.cleaned_trash_count >= TRASH_TARGET_COUNT:
             print("三个垃圾均已投放，跳过后续垃圾搜索")
             return None
-        
-        if trash_result is None:
-            trash_result = self.find_trash_in_room(room_name)
-        else:
-            self._announce_trash_found(trash_result, room_name)
-        if trash_result is None:
-            print(f"{room_name}中K4A没有找到垃圾")
+
+        trash_point = ROOM_TRASH_POINTS.get(room_name)
+        if trash_point is None or not self.location.get(trash_point):
+            print(f"{room_name}没有可用的固定垃圾抓取站位")
             return None
 
-        trash_goal = self.goalpoint.find_best_goal(
-            trash_result["map_coords"],
-            max_radius=TRASH_GOAL_MAX_RADIUS,
-            min_radius=TRASH_GOAL_MIN_RADIUS,
-        )
-        if trash_goal is None:
-            print(f"没有找到{room_name}垃圾附近的安全导航点")
-            return None
-
-        self.location["current_trash"] = trash_goal
-        if not self.navigator.goto("current_trash"):
-            print(f"无法接近{room_name}中的垃圾")
+        if not self.navigator.goto(trash_point):
+            print(f"无法到达{room_name}的垃圾抓取站位{trash_point}")
             return None
 
         try:
-            # catch_ty中的方法与当前self.kinova使用相同的控制接口，
-            # 直接复用实例，避免再次rospy.init_node和重复连接Action Server。
+            # 固定站位只确定机械臂工作位置；物品类别及精确位置由RealSense确认。
             from catch_ty import KinovaRobotGroud
 
             grasp_result = KinovaRobotGroud.catch_ground(
                 self.kinova,
                 weights_path=TRASH_MODEL_PATH,
-                target_items=[trash_result["trash_name"]],
+                target_items=TRASH_TARGET_CLASSES,
             )
             if not grasp_result:
-                print(f"{room_name}垃圾抓取失败")
+                print(f"{trash_point}未检测到可抓取垃圾或抓取失败")
                 return None
+
+            trash_name = grasp_result.name
+            if trash_name == "empty_bottle":
+                self.voice.say("发现空瓶", wait=True)
+            elif trash_name == "paper_ball":
+                self.voice.say("发现纸团", wait=True)
 
             if not self.navigator.goto("trash_can"):
                 print("已执行垃圾抓取，但无法到达垃圾桶")
@@ -786,106 +678,17 @@ class Controller:
             return None
 
         self.cleaned_trash_count += 1
-        trash_result["put_success"] = True
+        trash_result = {
+            "room_name": room_name,
+            "trash_name": trash_name,
+            "grasp_point": trash_point,
+            "put_success": True,
+        }
         self.trash_observations.append(trash_result)
         print(
             f"{room_name}垃圾已投放，"
             f"完成数量={self.cleaned_trash_count}/{TRASH_TARGET_COUNT}"
         )
-        return trash_result
-
-
-    def _announce_trash_found(self, trash_result, room_name):
-        """统一播报并打印已确认的垃圾候选。"""
-        found_name = trash_result["trash_name"]
-        if found_name == "empty_bottle":
-            self.voice.say("发现空瓶", wait=True)
-        elif found_name == "paper_ball":
-            self.voice.say("发现纸团", wait=True)
-        else:
-            self.voice.announce_trash_found(found_name, room_name)
-        print(
-            f"{room_name}发现垃圾：{found_name}，"
-            f"相机坐标={trash_result['camera_coords']}，"
-            f"地图坐标={trash_result['map_coords']}"
-        )
-
-
-    def find_trash_in_room(self, room_name):
-        """使用头顶Kinect分段扫描垃圾并返回相机/地图坐标。"""
-        found_name = None
-        camera_coords = None
-        map_coords = None
-        try:
-            if self.items_detector is None:
-                self.items_detector = ItemsDetector(model_path=TRASH_MODEL_PATH)
-            self.camera.open_camera()
-            for view_index in range(ROOM_SCAN_VIEW_COUNT):
-                if rospy.is_shutdown():
-                    break
-
-                print(
-                    f"{room_name}垃圾扫描方向 "
-                    f"{view_index + 1}/{ROOM_SCAN_VIEW_COUNT}"
-                )
-                target_name, coords = self.items_detector.detect_targets(
-                    self.camera,
-                    target_items=TRASH_TARGET_CLASSES,
-                    max_distance=TRASH_SCAN_MAX_DISTANCE,
-                    timeout=ROOM_SCAN_DETECT_TIMEOUT,
-                )
-                if target_name is not None:
-                    candidate_map_coords = self.transpoint.get_map_coords(coords)
-                    if candidate_map_coords is None:
-                        print(
-                            f"{room_name}的{target_name}候选坐标转换失败，"
-                            "继续扫描"
-                        )
-                    else:
-                        candidate_height = candidate_map_coords[2]
-                        if not (
-                            TRASH_MAP_MIN_HEIGHT <= candidate_height <=
-                            TRASH_MAP_MAX_HEIGHT
-                        ):
-                            print(
-                                f"忽略{room_name}的{target_name}候选："
-                                f"地图高度{candidate_height:.3f}m不在地面范围"
-                                f"[{TRASH_MAP_MIN_HEIGHT:.2f}, "
-                                f"{TRASH_MAP_MAX_HEIGHT:.2f}]m内"
-                            )
-                        else:
-                            found_name = target_name
-                            camera_coords = coords
-                            map_coords = candidate_map_coords
-                if found_name is not None:
-                    break
-
-                if not self.base.turn(
-                    ROOM_SCAN_STEP_DEGREES,
-                    timeout=ROOM_SCAN_TURN_TIMEOUT,
-                ):
-                    print(f"{room_name}垃圾扫描转向失败")
-                    break
-                rospy.sleep(ROOM_SCAN_SETTLE_SECONDS)
-        except Exception as error:
-            print(f"{room_name}垃圾粗定位发生异常：{error}")
-        finally:
-            try:
-                self.camera.release()
-            except Exception:
-                pass
-            cv2.destroyAllWindows()
-
-        if found_name is None or camera_coords is None or map_coords is None:
-            return None
-
-        trash_result = {
-            "room_name": room_name,
-            "trash_name": found_name,
-            "camera_coords": camera_coords,
-            "map_coords": map_coords,
-        }
-        self._announce_trash_found(trash_result, room_name)
         return trash_result
 
     def find_owner_in_room(self, room_name):
@@ -1157,7 +960,7 @@ class Controller:
         person_name = observation["person_name"]
 
         if behavior == ACTION_SIT or behavior == ACTION_LIE:
-            return self.handle_switch_behavior(observation["room_name"])
+            return self.handle_switch_behavior(observation["room_name"], person_name)
         if behavior == ACTION_FALL:
             return self.handle_fall_behavior(person_name)
         if behavior == ACTION_WAVE:
@@ -1167,8 +970,8 @@ class Controller:
         self.voice.say("暂时没有识别出你的行为", wait=False)
         return False
 
-    def handle_switch_behavior(self, room_name):
-        """坐下或躺下：前往所在房间的开关，操作唯一的按钮。"""
+    def handle_switch_behavior(self, room_name, person_name):
+        """坐下或躺下：识别开/关需求，再前往所在房间操作开关。"""
         if rospy.is_shutdown():
             return False
 
@@ -1180,17 +983,49 @@ class Controller:
             print(f"尚未填写{switch_point}的导航点坐标")
             return False
 
-        self.voice.say("需要操作哪个开关", wait=True)
-        time.sleep(1)
-        if rospy.is_shutdown():
+        action = None
+        for _ in range(3):
+            if rospy.is_shutdown():
+                return False
+            request_text = self.voice.ask_raw_text(
+                prompt=f"{person_name}，你需要打开还是关闭开关？",
+                duration=5.0,
+                retries=1,
+                repeat=False,
+                retry_prompt="",
+                free_grammar=False,
+            ).strip()
+            print(f"开关需求识别原文：{request_text}")
+            # “开关”是目标名称，不能把其中的“开、关”误判为动作。
+            action_text = request_text.replace("开关", "")
+            has_open = any(word in action_text for word in ("打开", "开启", "开"))
+            has_close = any(word in action_text for word in ("关闭", "关掉", "关"))
+            if has_open == has_close:
+                print("未能唯一确定打开或关闭，重新询问")
+                continue
+            parsed = self.voice.parser.parse_switch_command(action_text)
+            if parsed.action in ("开", "关"):
+                action = parsed.action
+                break
+
+        if action is None:
+            print("连续三次未识别出明确的开关需求，不执行机械臂动作")
             return False
-        self.voice.say("好的", wait=True)
+
+        action_word = "打开" if action == "开" else "关闭"
+        self.voice.say(
+            f"你的需求是{action_word}{ROOM_DISPLAY_NAMES[room_name]}的开关",
+            wait=True,
+        )
 
         try:
             if not self.navigator.goto(switch_point):
                 print(f"无法到达开关导航点{switch_point}")
                 return False
-            import switch as switch_controller
+            if room_name == "room0":
+                import switch0 as switch_controller
+            else:
+                import switch2 as switch_controller
             print(f"已到达{switch_point}，开始执行按钮动作")
             success = switch_controller.operate_switch()
             if success:
@@ -1198,10 +1033,7 @@ class Controller:
             else:
                 self.voice.say("开关操作失败", wait=False)
 
-            home_pose = list(self.kinova.homePositionMdeg)
-            print(f"机械臂开始回原位：{home_pose}")
-            self.kinova.arm_run(unit="mdeg", pose_target=home_pose)
-            print("机械臂已回到原位")            
+            # switch0.py / switch2.py 的 operate_switch() 内部已回到 home。
             return success
         except (Exception, SystemExit) as error:
             print(f"执行开关动作发生异常：{error}")
@@ -1303,7 +1135,7 @@ class Controller:
         for result in self.trash_observations:
             print(
                 f"{result['room_name']}：{result['trash_name']}，"
-                f"地图坐标={result['map_coords']}"
+                f"抓取站位={result['grasp_point']}"
             )
 
         """---自主离场---"""
