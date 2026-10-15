@@ -601,7 +601,7 @@ class KinovaRobotGroud:
         # home位
         home_position= [0.2104809731245041, -0.25873029232025146, 0.5095799565315247, 81.040, 83.972, 11.606]       
         #预备扔垃圾位
-        position_put = [0.610625, -0.047951, 0.482635, -111.642, 45.141, -160.083]
+        position_put = [0.680701, -0.156350, 0.712392, 129.047, 82.188, -37.965]
         self.arm_run(pose_target=position_put)
         self.finger_run(finger_target=[25,25,25])
         self.finger_run(finger_target=[0,0,0])
