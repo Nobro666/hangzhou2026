@@ -17,7 +17,6 @@ import rospy
 from catch_ground.src.catch import KinovaRobot
 from catch_ty import KinovaRobotGroud
 from jujia26 import (
-    TRASH_CATEGORY_LABELS,
     TRASH_OBJECT_LABELS,
     TRASH_TARGET_CLASSES,
     TRASH_TRUE_CLASS_IDS,
@@ -36,11 +35,10 @@ def format_scene(detections):
     for item in detections:
         class_id = item["class_id"]
         object_label = TRASH_OBJECT_LABELS.get(class_id, item["name"])
-        category_label = TRASH_CATEGORY_LABELS.get(class_id, object_label)
         kind = "真垃圾" if class_id in TRASH_TRUE_CLASS_IDS else "假垃圾"
-        key = (kind, object_label, category_label)
+        key = (kind, object_label)
         if key not in announced:
-            announcements.append(f"{kind}{object_label}，标签{category_label}")
+            announcements.append(f"{kind}{object_label}")
             announced.add(key)
     return "；".join(announcements)
 

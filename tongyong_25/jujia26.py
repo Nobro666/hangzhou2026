@@ -29,7 +29,7 @@
 
 注意&TODO：
 到场地后除了打需要导航到的点外，还要在赛场的四个角落各打一个点，确认赛场范围
-更换模型路径，添加发现果皮
+更换模型路径
 记得把注册主人改回3个
 记得填写 Switch0 和 switch2 的导航点坐标
 调整离场时间
@@ -106,12 +106,8 @@ ACTION_FALL = "摔倒"
 ACTION_WAVE = "挥手"
 ACTION_UNKNOWN = "躺着"
 
-# 房间内分段旋转搜索参数：检测 3 个方向，每次左转 120°，完成一整圈。
-ROOM_SCAN_VIEW_COUNT = 3
-ROOM_SCAN_STEP_DEGREES = 120.0
+# 房间内按导航点预设朝向检测一次人物，不转动底盘。
 ROOM_SCAN_DETECT_TIMEOUT = 2.0
-ROOM_SCAN_TURN_TIMEOUT = 8.0
-ROOM_SCAN_SETTLE_SECONDS = 0.5
 
 # 房间门口只按导航点预设朝向检测一次，不转动底盘。
 ROOM_DOOR_POINTS = {
@@ -179,10 +175,6 @@ TRASH_OBJECT_LABELS = {
     21: "药盒", 22: "药盒",
     23: "充电头", 24: "充电头", 25: "充电头",
     26: "积木", 27: "药盒", 28: "药盒",
-}
-TRASH_CATEGORY_LABELS = {
-    0: "空盒", 1: "空盒", 2: "空瓶", 3: "空瓶", 4: "空瓶",
-    5: "果皮", 6: "果皮", 7: "纸团", 19: "纸团", 20: "纸团",
 }
 TRASH_TARGET_COUNT = 3
 ENTRY_FORWARD_DISTANCE = 1.0  # 米：赛场门口标定后调整，需保证直行终点已越过门槛。
@@ -685,13 +677,10 @@ class Controller:
                 for item in detections:
                     class_id = item["class_id"]
                     object_label = TRASH_OBJECT_LABELS.get(class_id, item["name"])
-                    category_label = TRASH_CATEGORY_LABELS.get(class_id, object_label)
                     kind = "真垃圾" if class_id in TRASH_TRUE_CLASS_IDS else "假垃圾"
-                    key = (kind, object_label, category_label)
+                    key = (kind, object_label)
                     if key not in announced:
-                        announcements.append(
-                            f"{kind}{object_label}，标签{category_label}"
-                        )
+                        announcements.append(f"{kind}{object_label}")
                         announced.add(key)
                 if announcements:
                     self.voice.say("；".join(announcements), wait=True)
@@ -735,12 +724,11 @@ class Controller:
 
     def find_owner_in_room(self, room_name):
         """
-        在当前房间分段旋转一整圈并检测人物。
+        在当前房间的预设朝向检测人物，最多持续 2 秒。
 
         使用：
         - KinectCamera
         - PersonDetector.detect_person()
-        - Base.turn()
 
         返回：
         {
@@ -755,38 +743,13 @@ class Controller:
         self.valid_person_map_coords = None
         try:
             self.camera.open_camera()
-
-            for view_index in range(ROOM_SCAN_VIEW_COUNT):
-                if rospy.is_shutdown():
-                    break
-
-                current_angle = view_index * ROOM_SCAN_STEP_DEGREES
-                print(
-                    f"{room_name}人物扫描方向 "
-                    f"{view_index + 1}/{ROOM_SCAN_VIEW_COUNT}，"
-                    f"相对起始方向约 {current_angle:.0f}°"
-                )
-                has_person, camera_coords = (
-                    self.people_detector.detect_person(
-                        self.camera,
-                        max_distance=5.0,
-                        timeout=ROOM_SCAN_DETECT_TIMEOUT,
-                        candidate_filter=self._person_candidate_in_person_area,
-                    )
-                )
-                if has_person:
-                    break
-
-                # 每个方向未检测到人物后左转一段。最后一次也转动，
-                # 使完整扫描结束时总转角为 360°，恢复到起始方向。
-                turn_success = self.base.turn(
-                    ROOM_SCAN_STEP_DEGREES,
-                    timeout=ROOM_SCAN_TURN_TIMEOUT,
-                )
-                if not turn_success:
-                    print(f"{room_name}底盘转向失败，终止该房间扫描")
-                    break
-                rospy.sleep(ROOM_SCAN_SETTLE_SECONDS)
+            print(f"{room_name}按当前朝向检测人物，最长 {ROOM_SCAN_DETECT_TIMEOUT:.1f} 秒")
+            has_person, camera_coords = self.people_detector.detect_person(
+                self.camera,
+                max_distance=5.0,
+                timeout=ROOM_SCAN_DETECT_TIMEOUT,
+                candidate_filter=self._person_candidate_in_person_area,
+            )
         except Exception as error:
             print(f"{room_name}人物检测发生异常：{error}")
 
