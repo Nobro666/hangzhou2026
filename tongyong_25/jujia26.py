@@ -611,7 +611,15 @@ class Controller:
             self.voice.announce_owner_recognized(person_name, owner_index)
 
         behavior = self.recognize_behavior(face_id, person_name)
-        if behavior == ACTION_WAVE and self.wave_posture is not None:
+        seated_location = {
+            "room0": "客厅的沙发上",
+            "room2": "卧室的床上",
+        }.get(room_name)
+        if behavior == ACTION_SIT and seated_location:
+            behavior_announcement = f"{person_name}坐在{seated_location}"
+        elif behavior == ACTION_WAVE and self.wave_posture == "坐" and seated_location:
+            behavior_announcement = f"{person_name}坐在{seated_location}挥手"
+        elif behavior == ACTION_WAVE and self.wave_posture is not None:
             behavior_announcement = (
                 f"{person_name}{self.wave_posture}在{ROOM_DISPLAY_NAMES[room_name]}挥手"
             )
