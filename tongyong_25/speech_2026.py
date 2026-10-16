@@ -25,6 +25,9 @@
 依赖：
 - vosk
 - pyaudio
+- 可选降噪：python3 -m pip install numpy scipy pyrnnoise
+- ROBO_DENOISE=1（默认）启用 RNNoise；=0 关闭。原录音保留，另存 *_denoised.wav。
+- 排查远距离收音时 export ROBO_MIN_RMS=0，避免原有整段 RMS 门限拦截。
 - wave/json/os/time/datetime 等标准库
 - 模型：https://alphacephei.com/vosk/models（Linux：wget https://alphacephei.com/vosk/models/vosk-model-small-cn-0.22.zip
 unzip vosk-model-small-cn-0.22.zip）
@@ -83,7 +86,7 @@ DEFAULT_MODEL_PATHS = {
 
 # TODO 赛前/领队会确认后，把这里改成现场 3 位主人的候选名。
 # 若现场是随机志愿者，建议提前录入所有可能出现的名字，或改用自由识别后人工确认。
-DEFAULT_OWNER_NAMES = ["杰克", "安东", "李华"]
+DEFAULT_OWNER_NAMES = ["张三", "李四", "王五"]
 
 DEFAULT_SWITCH_COLORS = ["红色", "黄色", "蓝色", "绿色", "白色", "黑色", "红", "黄", "蓝", "绿", "白", "黑"]
 DEFAULT_SWITCH_NUMBERS = ["一", "二", "三", "四", "五", "六", "1", "2", "3", "4", "5", "6", "第一", "第二", "第三", "第四", "第五", "第六"]
@@ -233,6 +236,59 @@ def build_grammar_phrases(
 # Vosk 中文识别器
 # =========================
 
+def denoise_wav_file(audio_file: str) -> str:
+    """RNNoise 降噪，另存同目录 *_denoised.wav；异常由调用方回退原音频。
+
+    输入/输出均为 16 kHz 单声道 PCM16。显式重采样到 48 kHz，
+    按 RNNoise 所需的 480 点帧处理，再转回 16 kHz。不修改原始 WAV。
+    每段录音新建降噪状态，避免上一段音频影响下一段。
+    """
+    import numpy as np
+    from scipy.signal import resample_poly
+    from pyrnnoise import RNNoise
+
+    source = Path(audio_file)
+    output = source.with_name(source.stem + "_denoised.wav")
+    with wave.open(str(source), "rb") as wf:
+        if (wf.getnchannels(), wf.getsampwidth(), wf.getframerate()) != (1, 2, 16000):
+            raise ValueError("降噪输入必须是 16kHz 单声道 PCM16 WAV")
+        pcm = np.frombuffer(wf.readframes(wf.getnframes()), dtype="<i2")
+    if pcm.size == 0:
+        raise ValueError("录音为空，无法降噪")
+
+    # resample_poly 必须接收浮点数；直接传 int16 会造成错误的重采样结果。
+    upsampled = resample_poly(pcm.astype(np.float32), 3, 1)
+    # 尾部补零，满足完整帧并给滤波器留出尾音；输出时恢复原始采样点数。
+    pad = (-upsampled.size) % 480 + 960
+    padded = np.pad(upsampled, (0, pad))
+    input_pcm = np.clip(np.rint(padded), -32768, 32767).astype(np.int16)
+    denoiser = RNNoise(sample_rate=48000)
+    blocks = []
+    try:
+        for _, block in denoiser.denoise_chunk(input_pcm[None, :], partial=True):
+            block = np.asarray(block)
+            if block.ndim != 2 or block.shape[0] != 1 or block.dtype != np.int16:
+                raise ValueError("RNNoise 输出格式异常，预期单声道 int16")
+            blocks.append(block.reshape(-1).copy())
+    finally:
+        denoiser.reset()
+    if not blocks:
+        raise ValueError("RNNoise 未生成音频")
+    cleaned = np.concatenate(blocks)
+    if cleaned.size < upsampled.size or not np.isfinite(cleaned).all():
+        raise ValueError("RNNoise 输出不完整")
+    downsampled = resample_poly(cleaned.astype(np.float32), 1, 3)[:pcm.size]
+    output_pcm = np.clip(np.rint(downsampled), -32768, 32767).astype("<i2")
+    if np.any(pcm) and not np.any(output_pcm):
+        raise ValueError("降噪输出全部为零，回退原录音")
+    with wave.open(str(output), "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(16000)
+        wf.writeframes(output_pcm.tobytes())
+    return str(output)
+
+
 class VoskChineseRecognizer:
     """中文优先的 Vosk 离线识别器。"""
 
@@ -245,6 +301,7 @@ class VoskChineseRecognizer:
         grammar: Optional[Sequence[str]] = None,
         log_file: Optional[str] = None,
         min_rms: Optional[int] = None,
+        enable_denoise: Optional[bool] = None,
     ):
         self.language = language
         self.sample_rate = sample_rate
@@ -258,7 +315,12 @@ class VoskChineseRecognizer:
         # 先用录音 RMS 能量做静音门限；低于门限则直接判定“未听到有效人声”，不送入 Vosk。
         # 现场可按麦克风灵敏度调整：
         #   export ROBO_MIN_RMS=300
-        self.min_rms = int(os.environ.get("ROBO_MIN_RMS", str(min_rms or 50)))
+        self.min_rms = int(os.environ.get("ROBO_MIN_RMS", str(300 if min_rms is None else min_rms)))
+        self.enable_denoise = (
+            os.environ.get("ROBO_DENOISE", "1").strip().lower() not in ("0", "false", "no", "off")#这里修改是否启用降噪：1-降噪，0-不降噪。
+            if enable_denoise is None else enable_denoise
+        )
+        print(f"[降噪配置] RNNoise={'开启' if self.enable_denoise else '关闭'}；原始录音始终保留")
         # ===== 2026-09-30 静音误识别修正 END =====
         self.model = None
         self.recognizer = None
@@ -299,7 +361,7 @@ class VoskChineseRecognizer:
             raise RuntimeError("未安装 pyaudio，无法从麦克风录音")
 
         if filename is None:
-            stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
             filename = str(self.audio_dir / f"recording_{stamp}.wav")
 
         chunk = 1024
@@ -335,7 +397,7 @@ class VoskChineseRecognizer:
             return audioop.rms(frames, wf.getsampwidth())
     # ===== 2026-09-30 静音误识别修正 END =====
 
-    def recognize_file(self, audio_file: str) -> RecognitionResult:
+    def recognize_file(self, audio_file: str, audio_metadata: Optional[dict] = None) -> RecognitionResult:
         if self.recognizer is None:
             self._load_model()
 
@@ -353,6 +415,8 @@ class VoskChineseRecognizer:
 
         text = raw.get("text", "") or ""
         text = text.replace(" ", "")
+        if audio_metadata is not None:
+            raw["audio_processing"] = audio_metadata
         result = RecognitionResult(text=text, audio_file=audio_file, raw=raw, success=bool(text))
         self._log(result)
         return result
@@ -371,10 +435,28 @@ class VoskChineseRecognizer:
                 success=False,
             )
             self._log(result)
-            print("[语音识别] 录音能量低于阈值，判定为无人声/静音，跳过 Vosk 识别")
+            print("[语音识别] 原录音低于 RMS 门限，跳过识别和降噪；远距离排查可 export ROBO_MIN_RMS=0")
             return result
         # ===== 2026-09-30 静音误识别修正 END =====
-        return self.recognize_file(audio_file)
+        metadata = {"original_file": audio_file, "original_rms": rms,
+                    "denoise_enabled": self.enable_denoise, "denoise_applied": False}
+        recognition_file = audio_file
+        if self.enable_denoise:
+            started = time.monotonic()
+            try:
+                recognition_file = denoise_wav_file(audio_file)
+                metadata["denoise_applied"] = True
+                metadata["denoised_file"] = recognition_file
+                metadata["denoised_rms"] = self._audio_rms(recognition_file)
+                print(f"[降噪] 已完成：{recognition_file}，RMS={metadata['denoised_rms']}（不再用原门限拦截）")
+            except Exception as exc:
+                recognition_file = audio_file
+                metadata["denoise_error"] = f"{type(exc).__name__}: {exc}"
+                print(f"[降噪] 失败，使用原录音识别：{exc}")
+                print("[降噪] 安装依赖：python3 -m pip install numpy scipy pyrnnoise；关闭：export ROBO_DENOISE=0")
+            metadata["denoise_seconds"] = round(time.monotonic() - started, 3)
+        print(f"[识别输入] {recognition_file}")
+        return self.recognize_file(recognition_file, audio_metadata=metadata)
 
     def listen_with_retry(
         self,
@@ -593,6 +675,7 @@ class CompetitionVoiceService:
         model_path: Optional[str] = None,
         audio_dir: Optional[str] = None,
         wait_after_tts: bool = True,
+        enable_denoise: Optional[bool] = None,
     ):
         self.owner_names = list(owner_names or DEFAULT_OWNER_NAMES)
         self.speaker = speaker
@@ -609,6 +692,7 @@ class CompetitionVoiceService:
             language="zh",
             audio_dir=audio_dir,
             grammar=grammar,
+            enable_denoise=enable_denoise,
         )
 
     def _estimate_tts_seconds(self, text: str) -> float:
@@ -729,7 +813,7 @@ class CompetitionVoiceService:
         if owner_index is None:
             self.say(f"识别到主人，{person_name}", wait=True)
         else:
-            self.say(f"发现{person_name}", wait=True)
+            self.say(f"发现{person_name}", wait=False)
 
     def announce_behavior(self, behavior: str, person_name: Optional[str] = None):
         """识别姿态/行为后播报行为名称。"""
