@@ -5,6 +5,9 @@
   @Auther: Wang Zhe
   @Date: 2025-9-24
   @Version: 1.0
+
+
+  2026-10-16修改：增加真假垃圾识别
 """
 
 import argparse
@@ -49,6 +52,7 @@ class RealSenseYolo11Detector:
         self.pipeline = rs.pipeline()
         self.config = rs.config()
         self.align = rs.align(rs.stream.color)  
+        self.last_detections = []
         
         self.colors = {name: [random.randint(0, 255) for _ in range(3)] for name in self.model.names.values()}
 
@@ -87,7 +91,13 @@ class RealSenseYolo11Detector:
         depth_intrin = depth_frame.profile.as_video_stream_profile().intrinsics
         return color_img, depth_frame, depth_intrin
 
-    def detect_targets(self, target_items: list, max_retry: int = 5, show_window: bool = True) -> Union[YoloResult, None]:
+    def detect_targets(self, target_items: list, max_retry: int = 5,
+                       show_window: bool = True, report_all: bool = False) -> Union[YoloResult, None]:
+        """寻找可抓取目标；report_all 时另记录场景中检测到的全部模型类别。"""
+        self.last_detections = []
+        observed_by_class = {}
+        best_target = None
+        best_target_conf = -1.0
         # 配置RealSense流
         self.config.enable_stream(rs.stream.depth, 640, 480, rs.format.z16, 30)
         self.config.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 30)
@@ -111,16 +121,19 @@ class RealSenseYolo11Detector:
                 target_idxs = [name_to_idx[item] for item in target_items if item in name_to_idx]
                 results = self.model(
                     color_img, imgsz=self.imgsz, conf=self.conf_thres, 
-                    iou=self.iou_thres, classes=target_idxs if target_idxs else None,
+                    iou=self.iou_thres,
+                    classes=None if report_all else (target_idxs if target_idxs else None),
                     device=self.device, verbose=False
                 )
                 found_target = None
+                found_target_conf = -1.0
                 for result in results:
                     boxes = result.boxes.cpu().numpy()
                     for box in boxes:
                         xyxy = box.xyxy[0].tolist()  # 边界框（x1,y1,x2,y2）
-                        cls_name = self.model.names[int(box.cls[0])]
-                        conf = box.conf[0]
+                        cls_id = int(box.cls[0])
+                        cls_name = self.model.names[cls_id]
+                        conf = float(box.conf[0])
                         
 
                         print(f"检测到物品：{cls_name} | 置信度：{conf:.2f} | 边界框：{[round(x) for x in xyxy]}")
@@ -133,7 +146,18 @@ class RealSenseYolo11Detector:
                         cv2.putText(display_img, label, (x1, y1 - 10), 
                                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
-                        if cls_name not in target_items or conf < self.conf_thres:
+                        if conf < self.conf_thres:
+                            continue
+                        if report_all and (
+                            cls_id not in observed_by_class
+                            or conf > observed_by_class[cls_id]["confidence"]
+                        ):
+                            observed_by_class[cls_id] = {
+                                "class_id": cls_id,
+                                "name": cls_name,
+                                "confidence": conf,
+                            }
+                        if cls_name not in target_items:
                             continue
 
                         if cls_name in ["Handwash", "Shampoo"]:
@@ -162,7 +186,16 @@ class RealSenseYolo11Detector:
                         cv2.putText(display_img, angle_text, (x1, y2 + 40), 
                                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, [0, 255, 255], 2)
 
-                        found_target = YoloResult(cls_name, cam_x, cam_y, cam_z, item_angle)
+                        if conf > found_target_conf:
+                            found_target = YoloResult(cls_name, cam_x, cam_y, cam_z, item_angle)
+                            found_target_conf = conf
+
+                if found_target and found_target_conf > best_target_conf:
+                    best_target = found_target
+                    best_target_conf = found_target_conf
+                self.last_detections = [
+                    observed_by_class[index] for index in sorted(observed_by_class)
+                ]
 
                 if show_window:
                     cv2.putText(display_img, f"Retry: {retry_count}/{max_retry}", (10, 30),
@@ -180,15 +213,22 @@ class RealSenseYolo11Detector:
                         print("用户手动退出检测")
                         return None
 
-                if found_target:
+                # 先看到真垃圾时，再给假物品几帧识别机会；不因此改变抓取白名单。
+                has_other_item = any(
+                    item["name"] not in target_items for item in self.last_detections
+                )
+                if best_target and (not report_all or has_other_item):
                     if show_window:
                         # 额外显示1秒找到的结果
                         cv2.imshow("YOLO Detection (Found Target)", display_img)
                         cv2.waitKey(1000)
-                    return found_target
+                    return best_target
 
                 time.sleep(0.8)  
 
+            if best_target:
+                print("未识别到假物品，继续抓取已确认的真垃圾")
+                return best_target
             print(f"已重试{max_retry}次，未识别到指定物品")
             return None
 

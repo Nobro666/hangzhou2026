@@ -161,23 +161,28 @@ OWNER_CLOSE_MIN_RADIUS = 0.6
 BEHAVIOR_K4ABT_LIB_PATH = os.environ.get("K4ABT_LIB_PATH","/lib/libk4abt.so")
 BEHAVIOR_RECOGNIZE_FRAMES = 20
 
-# 固定站位抓取时由RealSense检测的目标类别。
+# 固定站位的真垃圾类别：模型索引 0～7，以及同样标注为纸团的 19、20。
+# 其余类别只用于场景识别和播报，不允许进入抓取流程。
 TRASH_TARGET_CLASSES = [
     "potatochips", "cookies", "icedtea", "cola",
     "shampoo", "apple", "banana", "paperball",
     "box_white_small", "box_white_large",
 ]
-TRASH_ANNOUNCEMENTS = {
-    "potatochips": "发现空盒",
-    "cookies": "发现空盒",
-    "icedtea": "发现空瓶",
-    "cola": "发现空瓶",
-    "shampoo": "发现空瓶",
-    "apple": "发现果皮",
-    "banana": "发现果皮",
-    "paperball": "发现纸团",
-    "box_white_small": "发现纸团",
-    "box_white_large": "发现纸团",
+TRASH_TRUE_CLASS_IDS = frozenset(range(8)) | {19, 20}
+TRASH_OBJECT_LABELS = {
+    0: "薯片", 1: "曲奇", 2: "冰红茶", 3: "可乐",
+    4: "洗发液", 5: "苹果", 6: "香蕉", 7: "纸团",
+    8: "洗手液", 9: "洗洁精", 10: "玩偶",
+    11: "杯子", 12: "杯子", 13: "杯子", 14: "杯子",
+    15: "药盒", 16: "药盒", 17: "药盒", 18: "药盒",
+    19: "纸团", 20: "纸团",
+    21: "药盒", 22: "药盒",
+    23: "充电头", 24: "充电头", 25: "充电头",
+    26: "积木", 27: "药盒", 28: "药盒",
+}
+TRASH_CATEGORY_LABELS = {
+    0: "空盒", 1: "空盒", 2: "空瓶", 3: "空瓶", 4: "空瓶",
+    5: "果皮", 6: "果皮", 7: "纸团", 19: "纸团", 20: "纸团",
 }
 TRASH_TARGET_COUNT = 3
 ENTRY_FORWARD_DISTANCE = 1.0  # 米：赛场门口标定后调整，需保证直行终点已越过门槛。
@@ -674,16 +679,28 @@ class Controller:
             # 固定站位只确定机械臂工作位置；物品类别及精确位置由RealSense确认。
             from catch_ty import KinovaRobotGroud
 
-            def announce_detected_trash(trash_name):
-                announcement = TRASH_ANNOUNCEMENTS.get(trash_name)
-                if announcement:
-                    self.voice.say(announcement, wait=True)
+            def announce_scene(detections):
+                announcements = []
+                announced = set()
+                for item in detections:
+                    class_id = item["class_id"]
+                    object_label = TRASH_OBJECT_LABELS.get(class_id, item["name"])
+                    category_label = TRASH_CATEGORY_LABELS.get(class_id, object_label)
+                    kind = "真垃圾" if class_id in TRASH_TRUE_CLASS_IDS else "假垃圾"
+                    key = (kind, object_label, category_label)
+                    if key not in announced:
+                        announcements.append(
+                            f"{kind}{object_label}，标签{category_label}"
+                        )
+                        announced.add(key)
+                if announcements:
+                    self.voice.say("；".join(announcements), wait=True)
 
             grasp_result = KinovaRobotGroud.catch_ground(
                 self.kinova,
                 weights_path=TRASH_MODEL_PATH,
                 target_items=TRASH_TARGET_CLASSES,
-                on_detected=announce_detected_trash,
+                on_scene_detected=announce_scene,
             )
             if not grasp_result:
                 print(f"{trash_point}未检测到可抓取垃圾或抓取失败")

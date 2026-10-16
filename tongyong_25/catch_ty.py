@@ -483,7 +483,7 @@ class KinovaRobotGroud:
         self.arm_run(pose_target=position_down)
 
     def catch_ground(self, weights_path=None, target_items=None,
-                     on_detected=None):
+                     on_detected=None, on_scene_detected=None):
         # 误差
         x_down = 0.633305
         y_down = -0.195270
@@ -506,7 +506,15 @@ class KinovaRobotGroud:
             ]
         detector = RealSenseYolo11Detector(weights=Path(weights_path))
         print("1")
-        result = detector.detect_targets(target_items=list(target_items))
+        result = detector.detect_targets(
+            target_items=list(target_items),
+            report_all=on_scene_detected is not None,
+        )
+        if on_scene_detected is not None:
+            try:
+                on_scene_detected(detector.last_detections)
+            except Exception as error:
+                rospy.logwarn("场景物品播报失败，继续按真垃圾识别结果处理：%s", error)
         print("2")
         if result:
             print("------识别成功------")
