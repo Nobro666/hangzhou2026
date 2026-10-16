@@ -4,7 +4,8 @@
 voice_name_pinyin_test.py
 
 实机测试“播报 -> 等待 done -> 录音 -> Vosk 转文字 -> 姓名拼音匹配 -> 播报匹配结果”。
-默认运行 5 轮真实测试。
+默认运行 5 轮真实测试。保留原有姓名及样例，追加乔治、哪吒。
+哪吒的 TTS 发音必须为 ne2 zha1；需安装 C++ 前端读音补丁并重新编译。
 
 默认运行：
     python3 voice_name_pinyin_test.py
@@ -39,7 +40,6 @@ from speech_2026 import (
     pyaudio,
     text_to_pinyin_key,
 )
-from summer_tts_speaker import SummerTTSSpeaker
 
 
 def check_pypinyin() -> bool:
@@ -82,7 +82,8 @@ def run_offline_samples(names: List[str]):
     print("\n========== 离线拼音匹配样例 ==========")
     print("候选姓名 target_name:", names)
     parser = CompetitionVoiceParser(owner_names=names)
-    samples = ["张三", "我叫张三", "李四", "王五", "晚雾", "王武", "找我啊", "张王", "里斯", "环境噪声"]
+    print("新增播报读音要求：哪吒 = ne2 zha1（由 C++ TTS 前端修正）")
+    samples = ["张三", "我叫张三", "李四", "王五", "晚雾", "王武", "找我啊", "张王", "里斯", "环境噪声", "乔治", "我叫乔治", "哪吒", "我叫哪吒"]
     for raw in samples:
         matched, score = resolve_by_parser(parser, raw)
         print(
@@ -98,6 +99,7 @@ def run_live_rounds(names: List[str], duration: float, rounds: int):
     print(f"测试轮数：{rounds}，每轮录音 {duration:.1f} 秒")
 
     import rospy
+    from summer_tts_speaker import SummerTTSSpeaker
 
     if not rospy.core.is_initialized():
         rospy.init_node("voice_name_pinyin_test", anonymous=True)
@@ -112,6 +114,14 @@ def run_live_rounds(names: List[str], duration: float, rounds: int):
     voice = CompetitionVoiceService(owner_names=names, speaker=speaker)
 
     voice.say("姓名拼音匹配测试开始", wait=True)
+    # 新增姓名播报校验：发送原汉字，ne2 zha1 由 SummerTTS C++ 前端保证。
+    # 这里的拼音提示和 Python 的拼音匹配均不会改变 TTS 音素。
+    print("[新增姓名播报校验] 下面依次播报乔治、哪吒；请听辨哪吒是否为 ne2 zha1。")
+    print("[前提] 已替换 hanzi2phoneid.cpp 并重新编译；旧读音缓存须重新生成。")
+    for added_name in ("乔治", "哪吒"):
+        if added_name in names:
+            voice.say(added_name, wait=True)
+    print("[提示] /summer_tts_done 仅表示播放完成，发音正确仍需人工听验。")
     for idx in range(1, rounds + 1):
         if rospy.is_shutdown():
             break
@@ -142,7 +152,7 @@ def run_live_rounds(names: List[str], duration: float, rounds: int):
 
 def main():
     parser = argparse.ArgumentParser(description="循环测试姓名拼音容错匹配")
-    parser.add_argument("--names", nargs="+", default=["杰克", "安东", "李华"], help="候选主人姓名列表")
+    parser.add_argument("--names", nargs="+", default=["张三", "李四", "王五", "乔治", "哪吒"], help="候选主人姓名列表（保留原三人，追加乔治、哪吒）")
     parser.add_argument("--rounds", type=int, default=5, help="实机测试轮数，默认 5")
     parser.add_argument("--duration", type=float, default=5.0, help="每轮录音时长")
     parser.add_argument("--score", type=float, default=None, help="拼音匹配阈值，对应 ROBO_NAME_PINYIN_MIN_SCORE")

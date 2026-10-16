@@ -92,7 +92,7 @@ class RealSenseYolo11Detector:
         return color_img, depth_frame, depth_intrin
 
     def detect_targets(self, target_items: list, max_retry: int = 5,
-                       show_window: bool = True, report_all: bool = False) -> Union[YoloResult, None]:
+                       show_window: bool = False, report_all: bool = False) -> Union[YoloResult, None]:
         """寻找可抓取目标；report_all 时另记录场景中检测到的全部模型类别。"""
         self.last_detections = []
         observed_by_class = {}
