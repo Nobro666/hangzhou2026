@@ -258,7 +258,7 @@ class VoskChineseRecognizer:
         # 先用录音 RMS 能量做静音门限；低于门限则直接判定“未听到有效人声”，不送入 Vosk。
         # 现场可按麦克风灵敏度调整：
         #   export ROBO_MIN_RMS=300
-        self.min_rms = int(os.environ.get("ROBO_MIN_RMS", str(min_rms or 300)))
+        self.min_rms = int(os.environ.get("ROBO_MIN_RMS", str(min_rms or 50)))
         # ===== 2026-09-30 静音误识别修正 END =====
         self.model = None
         self.recognizer = None
