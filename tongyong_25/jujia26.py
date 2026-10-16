@@ -217,6 +217,7 @@ class Controller:
         self.recognized_owner_ids = set()
         self.owner_observations = {}
         self.valid_person_map_coords = None
+        self.wave_posture = None
         self.cleaned_trash_count = 0
         self.trash_observations = []
       
@@ -610,8 +611,14 @@ class Controller:
             self.voice.announce_owner_recognized(person_name, owner_index)
 
         behavior = self.recognize_behavior(face_id, person_name)
+        if behavior == ACTION_WAVE and self.wave_posture is not None:
+            behavior_announcement = (
+                f"{person_name}{self.wave_posture}在{ROOM_DISPLAY_NAMES[room_name]}挥手"
+            )
+        else:
+            behavior_announcement = f"{person_name}在{ROOM_DISPLAY_NAMES[room_name]}{behavior}"
         self.voice.say(
-            f"{person_name}在{ROOM_DISPLAY_NAMES[room_name]}{behavior}",
+            behavior_announcement,
             wait=True,
         )
 
@@ -912,6 +919,7 @@ class Controller:
         """
 
         print(f">>> 准备识别{person_name}的行为，人脸ID={face_id}")
+        self.wave_posture = None
         behavior_detector = None
         try:
             # 延迟导入，避免程序启动阶段因Body Tracking运行库问题
@@ -940,6 +948,13 @@ class Controller:
                 POSE_WAVING: ACTION_WAVE,
             }
             behavior = behavior_mapping.get(detected_behavior, ACTION_UNKNOWN)
+            if behavior == ACTION_WAVE:
+                wave_posture = behavior_detector.last_wave_posture
+                if wave_posture == POSE_SITTING:
+                    self.wave_posture = "坐"
+                elif wave_posture == POSE_STANDING:
+                    self.wave_posture = "站"
+                print(f"挥手时的坐站姿态：{self.wave_posture or '未确定'}")
             if detected_behavior == POSE_STANDING:
                 print("检测到主人站立，但站立不属于当前任务行为")
             elif detected_behavior is None:

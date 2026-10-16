@@ -131,6 +131,7 @@ class BehaviorDetector:
         self.ground_y_by_z_a = ground_y_by_z_a
         self.ground_y_by_z_b = ground_y_by_z_b
         self.last_behavior = None
+        self.last_wave_posture = None
         self.no_body_count = 0
 
         # 记录各阶段是否成功，确保初始化中途失败时也能安全清理。
@@ -583,8 +584,10 @@ class BehaviorDetector:
     def recognize(self, frames=RECOGNIZE_FRAMES):
         """
         返回最终中文行为标签：'躺下睡觉' / '坐着休息' / '摔倒' / '挥手' / None。
-        注意：挥手优先级最高；站立未挥手不是目标行为，返回最近稳定行为或 None。
+        挥手时通过 last_wave_posture 保留同一批骨架帧的坐/站姿态。
+        注意：站立未挥手不是目标行为，返回最近稳定行为或 None。
         """
+        self.last_wave_posture = None
         joints_window = []
         pose_votes = []
         for _ in range(frames):
@@ -619,6 +622,13 @@ class BehaviorDetector:
         elif counts[POSE_LYING] >= max(2, len(pose_votes) // 3):
             result = POSE_LYING
         elif self._detect_wave_in_window(joints_window):
+            sitting_votes = counts[POSE_SITTING]
+            standing_votes = counts[POSE_STANDING]
+            if sitting_votes > standing_votes:
+                self.last_wave_posture = POSE_SITTING
+            else:
+                # 坐站票数相同时按站姿播报。
+                self.last_wave_posture = POSE_STANDING
             self.last_behavior = POSE_WAVING
             return POSE_WAVING
         else:
