@@ -497,9 +497,13 @@ class KinovaRobotGroud:
         self.arm_run(pose_target=position_down)
         rospy.timer.sleep(3)
         if weights_path is None:
-            weights_path = "/home/zq/catkin_ws/src/cmoon/src/hangzhou2026/tongyong_25/model/best5.pt"
+            weights_path = "/home/zq/catkin_ws/src/cmoon/src/hangzhou2026/tongyong_25/model/best(9).pt"
         if target_items is None:
-            target_items = ["empty_bottle", "paper_ball"]
+            target_items = [
+                "potatochips", "cookies", "icedtea", "cola",
+                "shampoo", "apple", "banana", "paperball",
+                "box_white_small", "box_white_large",
+            ]
         detector = RealSenseYolo11Detector(weights=Path(weights_path))
         print("1")
         result = detector.detect_targets(target_items=list(target_items))
@@ -609,7 +613,7 @@ class KinovaRobotGroud:
         # home位
         home_position= [0.2104809731245041, -0.25873029232025146, 0.5095799565315247, 81.040, 83.972, 11.606]       
         #预备扔垃圾位
-        position_put = [0.680701, -0.156350, 0.712392, 129.047, 82.188, -37.965]
+        position_put = [0.671921, 0.046201, 0.626671, 75.175, 74.406, 25.735]
         self.arm_run(pose_target=position_put)
         self.finger_run(finger_target=[25,25,25])
         self.finger_run(finger_target=[0,0,0])

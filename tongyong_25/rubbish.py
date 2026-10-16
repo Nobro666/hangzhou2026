@@ -23,9 +23,13 @@ from position_last_second import SmartGoalFinder
 
 DEFAULT_MODEL_PATH = (
     "/home/zq/catkin_ws/src/cmoon/src/hangzhou2026/"
-    "tongyong_25/model/best5.pt"
+    "tongyong_25/model/best(9).pt"
 )
-TARGET_ITEMS = ["empty_bottle", "paper_ball"]
+TARGET_ITEMS = [
+    "potatochips", "cookies", "icedtea", "cola",
+    "shampoo", "apple", "banana", "paperball",
+    "box_white_small", "box_white_large",
+]
 TRASH_MAP_MIN_HEIGHT = -0.15
 TRASH_MAP_MAX_HEIGHT = 0.45
 
@@ -42,7 +46,7 @@ def parse_args():
     parser.add_argument(
         "--target",
         choices=TARGET_ITEMS,
-        help="只测试指定类别；默认同时检测空瓶和纸团",
+        help="只测试指定类别；默认检测前八类及索引19、20的纸团",
     )
     parser.add_argument("--detect-timeout", type=float, default=8.0)
     parser.add_argument("--max-distance", type=float, default=5.0)

@@ -76,7 +76,8 @@ from geometry_msgs.msg import PoseWithCovarianceStamped
 
 # 储存导航路径点
 LOCATION = {  
-    "chu":[[0.6337276630383335,0.27157631732486287,0.138],[0.0,0.0,-0.01756594836124237,0.9998457068258934]],
+    # "chu":[[0.6337276630383335,0.27157631732486287,0.138],[0.0,0.0,-0.01756594836124237,0.9998457068258934]],
+    "chu":[[0.7827724183254573,-0.04977817439192954,0.13800000000000004],[0.0,0.0,0.01003517730254635,0.9999496463405078]],
     "start":[[3.1083250386123114,-0.81632613391356,0.13799999999999998],[0.0,0.0,0.516131573496784,0.8565093104220958]],
     "room0":[[5.8351309604451576,-0.15796936893040414,0.138],[0.0,0.0,0.8045668952205202,0.5938620303700285]],
     "room1_door":[[9.691715766017138,1.5217604867275114,0.13800000000000004],[0.0,0.0,-0.24244331726898682,0.9701655724213313]],
@@ -88,7 +89,7 @@ LOCATION = {
     "over":[[13.19744753608687,6.398889936126782,0.138],[0.0,0.0,0.6696931467824362,0.7426379260128306]],
     "switch0":[[6.716918665441541,2.908774259808008,0.138],[0.0,0.0,0.6763061213575394,0.7366206827223365]],
     "switch2":[[6.73580267040642,4.782803263482188,0.13800000000000004],[0.0,0.0,-0.03746954537696707,0.9992977700211501]],
-    "trash_can":[[7.75411979092854,0.10896294607847778,0.13799999999999998],[0.0,0.0,-0.06640034611866587,0.9977930617293955]],
+    "trash_can":[[6.6620011807241735,0.1957797653837563,0.13799999999999996],[0.0,0.0,-0.03805304339980452,0.9992757206537206]],
     "bed":[],
     "trash_1":[[9.278166391819127,-0.5184489134108972,0.138],[0.0,0.0,-0.7357672027548817,0.6772345408721093]],
     "trash_2":[[6.664121087244222,5.6827707243846675,0.13799999999999998],[0.0,0.0,0.5639161366401948,0.8258320597051177]],
@@ -138,10 +139,10 @@ ROOM_TRASH_POINTS = {
 # 人物有效区域（map坐标系，单位：米）。
 # TODO：根据当前比赛地图填写矩形区域的最小/最大X、Y坐标。
 # 参数未填写或范围无效时，人物候选会被拒绝并在终端提示。
-PERSON_AREA_MIN_X = -10.0
-PERSON_AREA_MAX_X = 10.0
-PERSON_AREA_MIN_Y = -10.0
-PERSON_AREA_MAX_Y = 10.0
+PERSON_AREA_MIN_X = 2.0
+PERSON_AREA_MAX_X = 15.0
+PERSON_AREA_MIN_Y = -1.0
+PERSON_AREA_MAX_Y = 7.0
 
 # 从上述矩形边界向场内收缩的安全余量，单位：米。
 # 不需要向内收缩时保持0.0；边界附近容易误收场外人员时可设为0.1～0.2。
@@ -161,11 +162,30 @@ BEHAVIOR_K4ABT_LIB_PATH = os.environ.get("K4ABT_LIB_PATH","/lib/libk4abt.so")
 BEHAVIOR_RECOGNIZE_FRAMES = 20
 
 # 固定站位抓取时由RealSense检测的目标类别。
-TRASH_TARGET_CLASSES = ["empty_bottle", "paper_ball"]
+TRASH_TARGET_CLASSES = [
+    "potatochips", "cookies", "icedtea", "cola",
+    "shampoo", "apple", "banana", "paperball",
+    "box_white_small", "box_white_large",
+]
+TRASH_ANNOUNCEMENTS = {
+    "potatochips": "发现空盒",
+    "cookies": "发现空盒",
+    "icedtea": "发现空瓶",
+    "cola": "发现空瓶",
+    "shampoo": "发现空瓶",
+    "apple": "发现果皮",
+    "banana": "发现果皮",
+    "paperball": "发现纸团",
+    "box_white_small": "发现纸团",
+    "box_white_large": "发现纸团",
+}
 TRASH_TARGET_COUNT = 3
+ENTRY_FORWARD_DISTANCE = 1.0  # 米：赛场门口标定后调整，需保证直行终点已越过门槛。
+ENTRY_FORWARD_SPEED = 0.40  # 米/秒：穿门阶段低速直行。
+ENTRY_FORWARD_TIMEOUT = 20.0  # 秒：位姿反馈异常或受阻时停止。
 TRASH_MODEL_PATH = os.environ.get(
     "TRASH_MODEL_PATH",
-    "/home/zq/catkin_ws/src/cmoon/src/hangzhou2026/tongyong_25/model/best5.pt",
+    "/home/zq/catkin_ws/src/cmoon/src/hangzhou2026/tongyong_25/model/best(9).pt",
 )
 
 
@@ -295,14 +315,14 @@ class Controller:
         wait_duration = 5.0 
 
         # 2. 设置你的机器人在 'map' 坐标系下的初始坐标 (单位：米)
-        pos_x = 0.6337276630383335  # <-- 在这里填入你的X坐标
-        pos_y = 0.27157631732486287  # <-- 在这里填入你的Y坐标
+        pos_x = 0.7827724183254573               #0.6337276630383335  # <-- 在这里填入你的X坐标
+        pos_y = -0.04977817439192954      #  # <-- 在这里填入你的Y坐标
         
         # 3. 设置你的机器人的初始朝向 (四元数)
         quat_x = 0.0  # <-- 在这里填入你的四元数X
         quat_y = 0.0  # <-- 在这里填入你的四元数Y
-        quat_z = -0.01756594836124237  # <-- 在这里填入你的四元数Z
-        quat_w = 0.9998457068258934  # <-- 在这里填入你的四元数W
+        quat_z = 0.01003517730254635  # <-- 在这里填入你的四元数Z
+        quat_w = 0.9999496463405078  # <-- 在这里填入你的四元数W
         # --- 配置结束 ---
 
         # 创建一个发布者，发布到 /initialpose 话题
@@ -478,7 +498,11 @@ class Controller:
             door_scan_available = True
             if room_name == "room0":
                 # 主人注册在start点完成，此时不重复导航。
-                print("room0使用当前start点进行门口检测")
+                if self.start_arrived:
+                    print("room0使用当前start点进行门口检测")
+                else:
+                    print("未到达start，跳过room0门口检测，尝试进入room0")
+                    door_scan_available = False
             else:
                 if not self.navigator.goto(door_name):
                     print(f"无法到达{door_name}，尝试直接进入{room_name}")
@@ -651,10 +675,9 @@ class Controller:
             from catch_ty import KinovaRobotGroud
 
             def announce_detected_trash(trash_name):
-                if trash_name == "empty_bottle":
-                    self.voice.say("发现空瓶", wait=True)
-                elif trash_name == "paper_ball":
-                    self.voice.say("发现纸团", wait=True)
+                announcement = TRASH_ANNOUNCEMENTS.get(trash_name)
+                if announcement:
+                    self.voice.say(announcement, wait=True)
 
             grasp_result = KinovaRobotGroud.catch_ground(
                 self.kinova,
@@ -1092,9 +1115,30 @@ class Controller:
     def control(self):
         text = None
         self.kinova.close_finger()
-        self.navigator.goto("chu")
-        self.navigator.goto("start")
-        self.voice.say("已到达入场点", wait=True)
+        try:
+            forward_success = self.navigator.move_forward(
+                ENTRY_FORWARD_DISTANCE,
+                speed=ENTRY_FORWARD_SPEED,
+                timeout=ENTRY_FORWARD_TIMEOUT,
+            )
+        except Exception as error:
+            print(f"入场直行发生异常：{error}")
+            forward_success = False
+        if rospy.is_shutdown():
+            return
+        if not forward_success:
+            print("入场直行未完成，继续尝试导航到 start")
+        try:
+            self.start_arrived = self.navigator.goto("start")
+        except Exception as error:
+            print(f"导航到入场点 start 发生异常：{error}")
+            self.start_arrived = False
+        if rospy.is_shutdown():
+            return
+        if self.start_arrived:
+            self.voice.say("已到达入场点", wait=True)
+        else:
+            print("无法到达入场点 start，继续注册与巡游")
         time.sleep(1)
 
 
