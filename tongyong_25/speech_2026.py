@@ -29,8 +29,8 @@
 - ROBO_DENOISE=1（默认）启用 RNNoise；=0 关闭。原录音保留，另存 *_denoised.wav。
 - 排查远距离收音时 export ROBO_MIN_RMS=0，避免原有整段 RMS 门限拦截。
 - wave/json/os/time/datetime 等标准库
-- 模型：https://alphacephei.com/vosk/models（Linux：wget https://alphacephei.com/vosk/models/vosk-model-small-cn-0.22.zip
-unzip vosk-model-small-cn-0.22.zip）
+- 模型：https://alphacephei.com/vosk/models（Linux：wget https://alphacephei.com/vosk/models/vosk-model-cn-0.22.zip
+unzip vosk-model-cn-0.22.zip）
 推荐中文模型：
 - vosk-model-small-cn-0.22：体积小，速度快；
 - vosk-model-cn-0.22：准确率更高，但加载慢、占用大。
@@ -300,7 +300,7 @@ class VoskChineseRecognizer:
         audio_dir: Optional[str] = None,
         grammar: Optional[Sequence[str]] = None,
         log_file: Optional[str] = None,
-        min_rms: Optional[int] = None,
+        min_rms: Optional[int] = 300,
         enable_denoise: Optional[bool] = None,
     ):
         self.language = language

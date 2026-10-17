@@ -116,12 +116,12 @@ def run_live_rounds(names: List[str], duration: float, rounds: int):
     voice.say("姓名拼音匹配测试开始", wait=True)
     # 新增姓名播报校验：发送原汉字，ne2 zha1 由 SummerTTS C++ 前端保证。
     # 这里的拼音提示和 Python 的拼音匹配均不会改变 TTS 音素。
-    print("[新增姓名播报校验] 下面依次播报乔治、哪吒；请听辨哪吒是否为 ne2 zha1。")
+    print("[新增姓名播报校验] 下面依次播报乔治、哪吒；请听辨哪吒是++否为 ne2 zha1。")
     print("[前提] 已替换 hanzi2phoneid.cpp 并重新编译；旧读音缓存须重新生成。")
-    for added_name in ("乔治", "哪吒"):
-        if added_name in names:
-            voice.say(added_name, wait=True)
-    print("[提示] /summer_tts_done 仅表示播放完成，发音正确仍需人工听验。")
+    # for added_name in ("乔治", "哪吒"):
+    #     if added_name in names:
+    #         voice.say(added_name, wait=True)
+    # print("[提示] /summer_tts_done 仅表示播放完成，发音正确仍需人工听验。")
     for idx in range(1, rounds + 1):
         if rospy.is_shutdown():
             break
