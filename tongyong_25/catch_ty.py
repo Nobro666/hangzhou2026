@@ -29,7 +29,7 @@ import geometry_msgs.msg
 
 # 夹爪完全闭合约为 finger_maxTurn。抓到物体时，至少两根手指应在
 # 到达完全闭合位置前受到阻挡；该比例可根据现场反馈数据继续微调。
-GRASP_EMPTY_POSITION_RATIO = 0.985
+GRASP_EMPTY_POSITION_RATIO = 0.895
 GRASP_REQUIRED_CONTACT_FINGERS = 2
 GRASP_FEEDBACK_TIMEOUT = 2.0
 

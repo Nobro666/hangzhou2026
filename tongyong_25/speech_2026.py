@@ -774,12 +774,11 @@ class CompetitionVoiceService:
             if rospy.is_shutdown():
                 return last_text
 
-            self.say(prompt, wait=True)
-
             old_grammar = list(self.recognizer.grammar) if self.recognizer.grammar else None
             if free_grammar:
                 self.recognizer.reset_grammar(None)
             try:
+                self.say(prompt, wait=True)
                 result = self.recognizer.listen_once(duration=duration)
             finally:
                 if free_grammar:
